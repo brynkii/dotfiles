@@ -1,0 +1,9 @@
+# "query:Unread Articles:unread = \"yes\""
+"query:Blog Posts:tags # \"blog\""
+
+# Blogs
+https://lukesmith.xyz/rss.xml blog
+https://tynan.com/feed/ blog
+https://opensourcemusings.com/feed/ blog
+https://ericmurphy.xyz/index.xml
+https://shivan.xyz/posts/index.xml
