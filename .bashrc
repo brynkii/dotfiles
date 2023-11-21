@@ -1,5 +1,6 @@
 #!bash
 # shellcheck disable=SC1090
+#this bashrc is mostly a copy of the creator rwxrob. Follow him for cooler scripts
 
 case $- in
 *i*) ;; # interactive
