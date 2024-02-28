@@ -26,7 +26,7 @@ set noignorecase
 set autowrite
 
 " deactivate line numbers
-set nonumber
+set number
 
 " turn col and row position on in bottom right
 set ruler " see ruf for formatting
