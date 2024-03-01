@@ -1,2 +1,2 @@
 # dotfiles
-a home for some of my configurations
+- A home for some of my configurations
