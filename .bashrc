@@ -1,6 +1,5 @@
 #!bash
 # shellcheck disable=SC1090
-#this bashrc is mostly a copy of the creator rwxrob. Follow him for cooler scripts
 
 case $- in
 *i*) ;; # interactive
@@ -28,7 +27,7 @@ export FTP=242
 export WEIGHT=83.7
 export HEIGHT=174
 export REPOS="$HOME/Repos"
-export GHREPOS="$REPOS/github/$GITUSER"
+export GHREPOS="$REPOS/github.com/$GITUSER"
 export DOTFILES="$GHREPOS/dot"
 export SCRIPTS="$DOTFILES/scripts"
 export SNIPPETS="$DOTFILES/snippets"
@@ -371,3 +370,6 @@ _source_if "$HOME/.bash_work"
 
 _have terraform && complete -C /usr/bin/terraform terraform
 _have terraform && complete -C /usr/bin/terraform tf
+
+# zoxide
+eval "$(zoxide init --cmd cd bash)"
