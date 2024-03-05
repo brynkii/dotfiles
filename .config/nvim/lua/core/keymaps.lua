@@ -95,7 +95,7 @@ vim.keymap.set("n", "<leader>u", vim.cmd.UndotreeToggle, { desc = "UndotreeToggl
 
 --Git
 -- Git
-vim.api.nvim_set_keymap("n", "<leader>gc", ":Git commit,<CR>", { noremap = false })
+vim.api.nvim_set_keymap("n", "<leader>gc", ":Git commit<CR>", { noremap = false })
 vim.api.nvim_set_keymap("n", "<leader>ga", ":Git add", { noremap = false })
 vim.api.nvim_set_keymap("n", "<leader>gp", ":Git push -u origin HEAD<CR>", { noremap = false })
 vim.api.nvim_set_keymap("n", "<leader>gs", ":Git status<CR>", { noremap = false })
