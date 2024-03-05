@@ -1,5 +1,5 @@
 ncmpcpp_directory = ~/.config/ncmpcpp
-mpd_music_dir = ~/music
+mpd_music_dir = ~/Music
 
 [playlist]
 song_columns_list_format = (50)[blue]{ar} (50)[green]{t}

@@ -6,15 +6,15 @@ vim.wo.number = true
 vim.opt.relativenumber = true
 
 -- Enable mouse mode
-vim.opt.mouse = 'a'
+vim.opt.mouse = "a"
 
 -- Sync clipboard between OS and Neovim.
 --  Remove this option if you want your OS clipboard to remain independent.
 --  See `:help 'clipboard'`
-vim.opt.clipboard = 'unnamedplus'
+vim.opt.clipboard = "unnamedplus"
 
 -- Enable break indent
- vim.opt.breakindent = true
+vim.opt.breakindent = true
 
 -- Save undo history
 vim.opt.undofile = true
@@ -24,7 +24,7 @@ vim.opt.ignorecase = true
 vim.opt.smartcase = true
 
 -- Keep signcolumn on by default
-vim.wo.signcolumn = 'yes'
+vim.wo.signcolumn = "yes"
 
 -- Decrease update time
 vim.opt.updatetime = 250
@@ -63,8 +63,11 @@ vim.opt.hlsearch = true
 vim.opt.termguicolors = true
 
 --Preview substitutions live, as you type!
-vim.opt.inccommand = 'split'
+vim.opt.inccommand = "split"
 
 --sets how neovim will desplay certainwhitespce in the editor.
 vim.opt.list = true
-vim.opt.listchars = { tab = '» ', trail = '·', nbsp = '␣' }
+vim.opt.listchars = { tab = "» ", trail = "·", nbsp = "␣" }
+
+-- Set completeopt to have a better completion experience
+vim.opt.completeopt = "menuone,noselect"
