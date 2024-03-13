@@ -1,4 +1,4 @@
-#!bash
+#!/bin/bash
 # shellcheck disable=SC1090
 
 case $- in
@@ -27,7 +27,7 @@ export FTP=242
 export WEIGHT=83.7
 export HEIGHT=174
 export REPOS="$HOME/Repos"
-export GHREPOS="$REPOS/github.com/$GITUSER"
+export GHREPOS="$REPOS/github/$GITUSER"
 export DOTFILES="$GHREPOS/dot"
 export SCRIPTS="$DOTFILES/scripts"
 export SNIPPETS="$DOTFILES/snippets"
@@ -42,12 +42,6 @@ export PICTURES="$HOME/Pictures"
 export MUSIC="$HOME/Music"
 export VIDEOS="$HOME/Videos"
 export WORKSPACES="$HOME/Workspaces" # container home dirs for mounting
-export ZETDIR="$GHREPOS/zet"
-export ZETTELCASTS="$VIDEOS/ZettelCasts"
-export CLIP_DIR="$VIDEOS/Clips"
-export CLIP_DATA="$GHREPOS/cmd-clip/data"
-export CLIP_VOLUME=0
-export CLIP_SCREEN=0
 export TERM=xterm-256color
 export HRULEWIDTH=73
 export EDITOR=vi
@@ -82,7 +76,7 @@ export ANSIBLE_LOAD_CALLBACK_PLUGINS=1
 
 # ----------------------------- PostgreSQL ----------------------------
 
-export PGDATABASE=cowork
+# export PGDATABASE=cowork
 
 # -------------------------------- gpg -------------------------------
 
@@ -166,6 +160,10 @@ shopt -s expand_aliases
 shopt -s globstar
 shopt -s dotglob
 shopt -s extglob
+shopt -s cmdhist
+shopt -s autocd
+shopt -s dirspell
+shopt -s cdspell
 
 #shopt -s nullglob # bug kills completion for some
 #set -o noclobber
@@ -178,8 +176,10 @@ stty -ixon # disable control-s/control-q tty flow control
 # ------------------------------ history -----------------------------
 
 export HISTCONTROL=ignoreboth
-export HISTSIZE=5000
-export HISTFILESIZE=10000
+export HISTSIZE=100000
+export HISTFILESIZE=100000
+HISTTIMEFORMAT='%F %T '
+PROMPT_COMMAND='history -a'
 
 set -o vi
 shopt -s histappend
@@ -232,7 +232,7 @@ _have setxkbmap && test -n "$DISPLAY" &&
 
 # ------------------------------ aliases -----------------------------
 #      (use exec scripts instead, which work from vim and subprocs)
-
+      
 unalias -a
 alias todo='vi ~/.todo'
 alias ip='ip -c'
@@ -265,45 +265,12 @@ alias pixel="scrcpy -t -s 1A141FDF600AJ4"
 #   done < <(env | grep LESS_TERM)
 # } && export -f lesscoloroff
 
-envx() {
-	local envfile="${1:-"$HOME/.env"}"
-	[[ ! -e "$envfile" ]] && echo "$envfile not found" && return 1
-	while IFS= read -r line; do
-		name=${line%%=*}
-		value=${line#*=}
-		[[ -z "${name}" || $name =~ ^# ]] && continue
-		export "$name"="$value"
-	done <"$envfile"
-} && export -f envx
-
-[[ -e "$HOME/.env" ]] && envx "$HOME/.env"
-
-new-from() {
-	local template="$1"
-	local name="$2"
-	! _have gh && echo "gh command not found" && return 1
-	[[ -z "$name" ]] && echo "usage: $0 <name>" && return 1
-	[[ -z "$GHREPOS" ]] && echo "GHREPOS not set" && return 1
-	[[ ! -d "$GHREPOS" ]] && echo "Not found: $GHREPOS" && return 1
-	cd "$GHREPOS" || return 1
-	[[ -e "$name" ]] && echo "exists: $name" && return 1
-	gh repo create -p "$template" --public "$name"
-	gh repo clone "$name"
-	cd "$name" || return 1
-}
-
-new-bonzai() { new-from rwxrob/bonzai-example "$1"; }
-new-cmd() { new-from rwxrob/template-bash-command "cmd-$1"; }
-cdz() { cd $(zet get "$@"); }
-
-export -f new-from new-bonzai new-cmd
-
 clone() {
 	local repo="$1" user
 	local repo="${repo#https://github.com/}"
 	local repo="${repo#git@github.com:}"
 	if [[ $repo =~ / ]]; then
-		user="${repo%%/*}"
+		user="${repo%%/*}" 
 	else
 		user="$GITUSER"
 		[[ -z "$user" ]] && user="$USER"
@@ -322,7 +289,7 @@ clone() {
 # ------------- source external dependencies / completion ------------
 
 # for mac
-[[ -r "/usr/local/etc/profile.d/bash_completion.sh" ]] && . "/usr/local/etc/profile.d/bash_completion.sh"
+# [[ -r "/usr/local/etc/profile.d/bash_completion.sh" ]] && . "/usr/local/etc/profile.d/bash_completion.sh"
 
 owncomp=(
 	pdf zet keg kn yt gl auth pomo config live iam sshkey ws x z clip
@@ -372,4 +339,4 @@ _have terraform && complete -C /usr/bin/terraform terraform
 _have terraform && complete -C /usr/bin/terraform tf
 
 # zoxide
-eval "$(zoxide init --cmd cd bash)"
+eval "$(zoxide init bash)"
