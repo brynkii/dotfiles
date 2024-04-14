@@ -339,4 +339,4 @@ _have terraform && complete -C /usr/bin/terraform terraform
 _have terraform && complete -C /usr/bin/terraform tf
 
 # zoxide
-eval "$(zoxide init bash)"
+# eval "$(zoxide init bash)"
