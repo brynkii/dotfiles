@@ -1,0 +1,11 @@
+[user]
+	email = Brianmaina01@skiff.com
+	name = brynki
+[init]
+	defaultBranch = main
+[color]
+	ui = auto
+[pull]
+	rebase = false
+[core]
+	editor = nvim
