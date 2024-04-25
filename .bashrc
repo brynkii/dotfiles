@@ -22,7 +22,7 @@ _source_if() { [[ -r "$1" ]] && source "$1"; }
 
 export LANG=en_US.UTF-8 # assuming apt install language-pack-en done
 export USER="${USER:-$(whoami)}"
-export GITUSER="$USER"
+export GITUSER="brynki01"
 export FTP=242
 export WEIGHT=83.7
 export HEIGHT=174
@@ -48,7 +48,7 @@ export EDITOR=vi
 export VISUAL=vi
 export EDITOR_PREFIX=vi
 export GOPRIVATE="github.com/$GITUSER/*,gitlab.com/$GITUSER/*"
-#export GOPATH="$HOME/.local/go"
+export GOPATH="$HOME/.local/go"
 export GOBIN="$HOME/.local/bin"
 export GOPROXY=direct
 export CGO_ENABLED=0
@@ -56,7 +56,6 @@ export PYTHONDONTWRITEBYTECODE=2
 export LC_COLLATE=C
 export CFLAGS="-Wall -Wextra -Werror -O0 -g -fsanitize=address -fno-omit-frame-pointer -finstrument-functions"
 
-# Color for manpages in less makes manpages a little easier to read
 export LESS="-FXR"
 export LESS_TERMCAP_mb="[35m" # magenta
 export LESS_TERMCAP_md="[33m" # yellow
@@ -254,7 +253,27 @@ alias clear='printf "\e[H\e[2J"'
 alias c='printf "\e[H\e[2J"'
 alias coin="xclip '(yes|no)'"
 alias more="less"
-alias pixel="scrcpy -t -s 1A141FDF600AJ4"
+
+# aliases for multiple directory listing commands
+alias lx='ls -lXBh'               # sort by extension
+alias lk='ls -lSrh'               # sort by size
+alias lc='ls -lcrh'               # sort by change time
+alias lu='ls -lurh'               # sort by access time
+alias lr='ls -lRh'                # recursive ls
+alias lt='ls -ltrh'               # sort by date
+alias lw='ls -xAh'                # wide listing format
+alias ll='ls -Fls'                # long listing format
+alias labc='ls -lap'              #alphabetical sort
+alias lf="ls -l | egrep -v '^d'"  # files only
+alias ldir="ls -l | egrep '^d'"   # directories only
+alias logs="sudo find /var/log -type f -exec file {} \; | grep 'text' | cut -d' ' -f1 | sed -e's/:$//g' | grep -v '[0-9]$' | xargs tail -f"
+
+# Alias's to show disk space and space used in a folder
+alias folders='du -h --max-depth=1'
+alias folderssort='find . -maxdepth 1 -type d -print0 | xargs -0 du -sk | sort -rn'
+alias tree='tree -CAhF --dirsfirst'
+alias treed='tree -CAFd'
+
 
 
 # ----------------------------- functions ----------------------------
@@ -329,14 +348,17 @@ _have ansible-pull && . <(register-python-argcomplete3 ansible-pull)
 _have ansible-vault && . <(register-python-argcomplete3 ansible-vault)
 #_have ssh-agent && test -z "$SSH_AGENT_PID" && . <(ssh-agent)
 
-# -------------------- personalized configuration --------------------
-
-_source_if "$HOME/.bash_personal"
-_source_if "$HOME/.bash_private"
-_source_if "$HOME/.bash_work"
-
-_have terraform && complete -C /usr/bin/terraform terraform
-_have terraform && complete -C /usr/bin/terraform tf
-
-# zoxide
-# #eval "$(zoxide init bash)"
+# Enable bash programmable completion features in interactive shells 
+if [ -f /usr/share/bash-completion/bash_completion ]; then
+	. /usr/share/bash-completion/bash_completion
+elif [ -f /etc/bash_completion ]; then
+	. /etc/bash_completion
+fi
+# remember last arg will be first in path
+pathprepend \
+	"$HOME/.local/bin" \
+	"$HOME/.local/go/bin" \
+	"$HOME/.nimble/bin" \
+	"$GHREPOS/cmd-"* \
+	/usr/local/go/bin \
+	/usr/local/opt/openjdk/bin \
