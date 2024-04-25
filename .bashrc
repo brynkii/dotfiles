@@ -266,14 +266,23 @@ alias ll='ls -Fls'                # long listing format
 alias labc='ls -lap'              #alphabetical sort
 alias lf="ls -l | egrep -v '^d'"  # files only
 alias ldir="ls -l | egrep '^d'"   # directories only
+
+# show all logs in /var/log 
 alias logs="sudo find /var/log -type f -exec file {} \; | grep 'text' | cut -d' ' -f1 | sed -e's/:$//g' | grep -v '[0-9]$' | xargs tail -f"
 
 # Alias's to show disk space and space used in a folder
-alias folders='du -h --max-depth=1'
+alias folders='du -h --max-depth=1 2> /dev/null'
 alias folderssort='find . -maxdepth 1 -type d -print0 | xargs -0 du -sk | sort -rn'
 alias tree='tree -CAhF --dirsfirst'
 alias treed='tree -CAFd'
 
+# alias to modified commands 
+alias ps='ps -auxf'
+alias ping='ping -c 10'
+alias mkdir='mkdir -p'
+
+# show open ports
+alias openports='netstat -nape --inet'
 
 
 # ----------------------------- functions ----------------------------
@@ -284,26 +293,102 @@ alias treed='tree -CAFd'
 #   done < <(env | grep LESS_TERM)
 # } && export -f lesscoloroff
 
-clone() {
-	local repo="$1" user
-	local repo="${repo#https://github.com/}"
-	local repo="${repo#git@github.com:}"
-	if [[ $repo =~ / ]]; then
-		user="${repo%%/*}" 
+# Extracts any archive(s)
+ext ()
+{
+  if [ -f "$1" ] ; then
+    case "$1" in
+      *.tar.bz2)   tar xjf "$1"   ;;
+      *.tar.gz)    tar xzf "$1"   ;;
+      *.tar.xz)    tar xJf "$1"   ;;
+      *.bz2)       bunzip2 "$1"   ;;
+      *.rar)       unrar x "$1"   ;;
+      *.gz)        gunzip "$1"    ;;
+      *.tar)       tar xf "$1"    ;;
+      *.tbz2)      tar xjf "$1"   ;;
+      *.tgz)       tar xzf "$1"   ;;
+      *.zip)       unzip "$1"     ;;
+      *.Z)         uncompress "$1";;
+      *.7z)        7z x "$1"      ;;
+      *)           echo "'$1' cannot be extracted via ex()" ;;
+    esac
+  else
+    echo "'$1' is not a valid file"
+  fi
+}
+
+# Copy and go to the directory
+cpg() {
+	if [ -d "$2" ]; then
+		cp "$1" "$2" && cd "$2" || return;
 	else
-		user="$GITUSER"
-		[[ -z "$user" ]] && user="$USER"
+		cp "$1" "$2"
 	fi
-	local name="${repo##*/}"
-	local userd="$REPOS/github.com/$user"
-	local path="$userd/$name"
-	[[ -d "$path" ]] && cd "$path" && return
-	mkdir -p "$userd"
-	cd "$userd"
-	echo gh repo clone "$user/$name" -- --recurse-submodule
-	gh repo clone "$user/$name" -- --recurse-submodule
-	cd "$name"
-} && export -f clone
+}
+
+# Move and go to the directory
+mvg() {
+	if [ -d "$2" ]; then
+		mv "$1" "$2" && cd "$2"  || return;
+	else
+		mv "$1" "$2"
+	fi
+}
+
+# Goes up a specified number of directories  (i.e. up 4)
+up() {
+	local d=""
+	limit=$1
+	for ((i = 1; i <= limit; i++)); do
+		d=$d/..
+	done
+	d=$(echo $d | sed 's/^\///')
+	if [ -z "$d" ]; then
+		d=..
+	fi
+	cd "$d" || return ;
+}
+
+# Show current network information
+netinfo() {
+	echo "--------------- Network Information ---------------"
+	/sbin/ifconfig | awk /'inet addr/ {print $2}'
+	echo ""
+	/sbin/ifconfig | awk /'Bcast/ {print $3}'
+	echo ""
+	/sbin/ifconfig | awk /'inet addr/ {print $4}'
+
+	/sbin/ifconfig | awk /'HWaddr/ {print $4,$5}'
+	echo "---------------------------------------------------"
+}
+
+# IP address lookup
+alias whatismyip="whatsmyip"
+function whatsmyip() {
+	# Dumps a list of all IP addresses for every device
+	# /sbin/ifconfig |grep -B1 "inet addr" |awk '{ if ( $1 == "inet" ) { print $2 } else if ( $2 == "Link" ) { printf "%s:" ,$1 } }' |awk -F: '{ print $1 ": " $3 }';
+
+	### Old commands
+	# Internal IP Lookup
+	#echo -n "Internal IP: " ; /sbin/ifconfig eth0 | grep "inet addr" | awk -F: '{print $2}' | awk '{print $1}'
+	#
+	#	# External IP Lookup
+	#echo -n "External IP: " ; wget http://smart-ip.net/myip -O - -q
+
+	# Internal IP Lookup.
+	if [ -e /sbin/ip ]; then
+		echo -n "Internal IP: "
+		/sbin/ip addr show wlan0 | grep "inet " | awk -F: '{print $1}' | awk '{print $2}'
+	else
+		echo -n "Internal IP: "
+		/sbin/ifconfig wlan0 | grep "inet " | awk -F: '{print $1} |' | awk '{print $2}'
+	fi
+
+	# External IP Lookup
+	echo -n "External IP: "
+	curl -s ifconfig.me
+}
+
 
 # ------------- source external dependencies / completion ------------
 
@@ -359,6 +444,12 @@ pathprepend \
 	"$HOME/.local/bin" \
 	"$HOME/.local/go/bin" \
 	"$HOME/.nimble/bin" \
-	"$GHREPOS/cmd-"* \
+	"$REPOS/cmd-"* \
 	/usr/local/go/bin \
 	/usr/local/opt/openjdk/bin \
+
+# install zoxide 
+eval "$(zoxide init bash)"
+
+# install starship
+eval "(starship init bash)"
