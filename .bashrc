@@ -391,6 +391,13 @@ function whatsmyip() {
 	curl -s ifconfig.me
 }
 
+# ------------- Hardware information -----------------------------------
+hwinfo() {
+	sensors  # Needs: 'sudo apt-get install lm-sensors'
+	uptime   # Needs: 'sudo apt-get install lsscsi'
+	lsscsi
+	free -h 
+}
 
 # ------------- source external dependencies / completion ------------
 
@@ -455,3 +462,9 @@ eval "$(zoxide init bash)"
 
 # install starship
 eval "(starship init bash)"
+
+# Welcome message
+sl
+echo -ne "Good Morning, $USER It's "; date '+%A, %B %-d %Y'
+echo -e "And now your moment of Zen:"; fortune
+
