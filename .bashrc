@@ -56,6 +56,7 @@ export PYTHONDONTWRITEBYTECODE=2
 export LC_COLLATE=C
 export CFLAGS="-Wall -Wextra -Werror -O0 -g -fsanitize=address -fno-omit-frame-pointer -finstrument-functions"
 
+# Color for manpages in less makes manpages a little easier to read
 export LESS="-FXR"
 export LESS_TERMCAP_mb="[35m" # magenta
 export LESS_TERMCAP_md="[33m" # yellow
@@ -175,7 +176,7 @@ stty -ixon # disable control-s/control-q tty flow control
 
 # ------------------------------ history -----------------------------
 
-export HISTCONTROL=ignoreboth
+export HISTCONTROL=ignoreboth:erasedups:ignorespace:ignoredups
 export HISTSIZE=100000
 export HISTFILESIZE=100000
 HISTTIMEFORMAT='%F %T '
@@ -253,7 +254,6 @@ alias clear='printf "\e[H\e[2J"'
 alias c='printf "\e[H\e[2J"'
 alias coin="xclip '(yes|no)'"
 alias more="less"
-alias disclaimer="clear; now; zet view disclaimer"
 alias pixel="scrcpy -t -s 1A141FDF600AJ4"
 
 
