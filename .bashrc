@@ -26,7 +26,7 @@ export GITUSER="brynki01"
 export FTP=242
 export WEIGHT=83.7
 export HEIGHT=174
-export REPOS="$HOME/Repos"
+export REPOS="$HOME/repos"
 export GHREPOS="$REPOS/github/$GITUSER"
 export DOTFILES="$HOME/dotfiles"
 export SCRIPTS="$DOTFILES/local/bin"
@@ -282,10 +282,15 @@ alias treed='tree -CAFd'
 alias ps='ps -auxf'
 alias ping='ping -c 10'
 alias mkdir='mkdir -p'
+alias rm="trash -v"
 
 # show open ports
 alias openports='netstat -nape --inet'
 
+# search
+alias h="history | grep "  # search command-line history
+alias f="find . | grep "   # search files in the current folder
+alias hist="history | fzf " # look at the command line history using fzf
 
 # ----------------------------- functions ----------------------------
 
@@ -351,6 +356,113 @@ up() {
 	cd "$d" || return ;
 }
 
+# copy file with a progress bar
+cpp() {
+	set -e
+	strace -q -ewrite cp -- "${1}" "${2}" 2>&1 |
+		awk '{
+			count += $NF
+			if (count % 10 == 0) {
+				percent = count / total_size * 100
+				printf "%3d%% [", percent
+				for (i=0;i<=percent;i++)
+					printf "="
+					printf ">"
+					for (i=percent;i<100;i++)
+						printf " "
+						printf "]\r"
+			}
+		}
+		END { print ""}' total_size="$(stat -c '%s' "${1}")" count=0
+}
+
+# search for text in all files in the current folder
+ftext() {
+	# -i case-insensitive
+	# -I ignore binary files 
+	# -H causes filname to be printed
+	# -r recursive search
+	# -n causes the line number to be printed
+	# optional: -F treat search term as literal, not a regular expression
+	# optional: -l only print filenames and not the matching lines
+	grep -iIHrn --color=always "$1" . | less -r
+}
+
+# show the current distribution
+distribution() {
+	local dtype="unknown" #Default to unknown
+
+	# use /etc/os-release for modern distro identification
+	if [ -r /etc/os-release ]; then
+		source /etc/os-release
+		case $ID in
+			fedora|rhel|centos)
+				dtype="redhat"
+				;;
+			sles|opensuse*)
+				dtype="suse"
+				;;
+			ubuntu|debian)
+				dtype="debian"
+				;;
+			gentoo)
+				dtype="gentoo"
+				;;
+			arch)
+				dtype="arch"
+				;;
+			slackware)
+				dtype="slackware"
+				;;
+			*)
+			# If ID is not recognized,keep dtype as unknown
+			  ;;
+		esac
+	fi
+
+	echo $dtype
+}
+
+# Show the current version of the operating system
+ver() {
+	local dtype
+	dtype=$(distribution)
+
+	case $dtype in
+		"redhat")
+			if [ -s /etc/redhat-release ]; then
+				cat /etc/redhat-release
+			else
+				cat /etc/issue
+			fi
+			uname -a
+			;;
+		"suse")
+			cat /etc/susE-release
+			;;
+		"debian")
+			lsb_release -a
+			;;
+		"gentoo")
+			cat /etc/gentoo-release
+			;;
+		"arch")
+			cat /etc/os-release
+			;;
+		"slackware")
+			cat /etc/slackware-version
+			;;
+		*)
+			if [ -s /etc/issue ]; then
+				cat /etc/issue
+			else
+				echo "Error: Unknown distribution"
+				exit 1
+			fi
+			;;
+	esac
+}
+
 # Show current network information
 netinfo() {
 	echo "--------------- Network Information ---------------"
@@ -397,6 +509,15 @@ hwinfo() {
 	lsscsi
 	free -h 
 }
+
+# Trim leading and trailing spaces (for scripts)
+ trim() {
+   local var=$*
+   var="${var#"${var%%[![:space:]]*}"}" # remove leading whitespace char
+   var="${var%"${var##*[![:space:]]}"}" # remove trailing whitespace cha
+   echo -n "$var"\n
+}
+
 
 # ------------- source external dependencies / completion ------------
 
@@ -460,11 +581,10 @@ pathprepend \
 eval "$(zoxide init bash)"
 
 # install starship
-eval "(starship init bash)"
+eval "$(starship init bash)"
 
 # Welcome message
-sl
-clear 
-echo -ne "Good Morning, $USER It's "; date '+%A, %B %-d %Y'
+fastfetch
+echo -ne "Hello $USER It's "; date '+%A, %B %-d %Y'
 echo -e "And now your moment of Zen:"; fortune
 
