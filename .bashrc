@@ -128,6 +128,7 @@ pathprepend \
 	"$HOME/.local/go/bin" \
 	"$HOME/.nimble/bin" \
 	"$GHREPOS/cmd-"* \
+	"$HOME/.local/tools" \
 	/usr/local/go/bin \
 	/usr/local/opt/openjdk/bin \
 	/usr/local/bin \
