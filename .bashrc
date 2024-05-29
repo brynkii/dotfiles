@@ -129,6 +129,7 @@ pathprepend \
 	"$HOME/.nimble/bin" \
 	"$GHREPOS/cmd-"* \
 	"$HOME/.local/tools/nvim-linux64/bin" \
+	"$HOME/.local/tools/.fzf/bin" \
 	"$HOME/.cargo/bin" \
 	/usr/local/go/bin \
 	/usr/local/opt/openjdk/bin \
@@ -590,7 +591,7 @@ fastfetch
 echo -ne "Hello $USER It's "; date '+%A, %B %-d %Y'
 echo -e "And now your moment of Zen:"; fortune
 
-
+# installing Node
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
