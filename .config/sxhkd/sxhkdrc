@@ -78,4 +78,14 @@ alt + v
     CM_LAUNCHER=rofi clipmenu 
     
 
- 
+ # audio
+
+# Change volume, chunky
+super + shift + Up
+    ~./local/bin/changevolume up
+    
+super + shift + Down
+	~./local/bin/changevolume down
+	
+super + shift + m
+	~./local/bin/changevolume mute
