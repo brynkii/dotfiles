@@ -31,8 +31,8 @@ alt + Escape
 	pkill -USR1 -x sxhkd; notify-send 'sxhkd' 'Reloaded config'
 # application launchers
 
-alt + f
-	thunar
+alt + s
+	slock
 
 alt + e
 	geany
@@ -77,5 +77,6 @@ alt + shift + b
 alt + v
     CM_LAUNCHER=rofi clipmenu 
     
+
 
  
