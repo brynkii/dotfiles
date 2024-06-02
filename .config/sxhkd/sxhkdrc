@@ -53,7 +53,7 @@ alt + o
 	obs
 
 alt + t
-	~/bin/time_date
+	thunar
 
 
 
@@ -79,7 +79,13 @@ alt + shift + b
 ## Show clipmenu
 alt + v
     CM_LAUNCHER=rofi clipmenu 
-    
 
+## brightness 
+XF86MonBrightness{Up,Down}
+	brightnessctl s {+2%,2%-}
+
+## Audio
+XF86Audio{RaiseVolume,LowerVolume,Mute}
+	pamixer -{i,d,t} 2; kill -34 $(cat ~/.cache/pidofbar)
 
  
