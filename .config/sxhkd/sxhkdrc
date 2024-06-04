@@ -19,10 +19,6 @@ alt + shift + Return
 alt + n
 	bash ~/bin/rofi-network-manager
 
-# logout, shutdown, reboot
-alt + x
-	~/bin/power
-	
 # help with shortcuts
 alt + h
 	~/bin/dwm-key
@@ -60,13 +56,15 @@ alt + t
 #########
 # Scrot #
 #########
+@print
+	flameshot gui
 alt + shift + @s
-	scrot -s -e 'mv $f ~/Pictures'; \
-	notify-send 'Scrot' 'Selected image to ~/Pictures'
+	scrot -s -e 'mv $f ~/Pictures/screenshots/'; \
+	notify-send 'Scrot' 'Selected image to ~/Pictures/screenshots'
 
 alt + s
-	scrot -e 'mv $f ~/Pictures'; \
-	notify-send 'Scrot' 'Image saved to ~/Pictures'
+	scrot -e 'mv $f ~/Pictures/screenshots/'; \
+	notify-send 'Scrot' 'Image saved to ~/Pictures/screenshots/'
 	
 ## redshift
 alt + shift + r
@@ -85,7 +83,17 @@ XF86MonBrightness{Up,Down}
 	brightnessctl s {+2%,2%-}
 
 ## Audio
-XF86Audio{RaiseVolume,LowerVolume,Mute}
-	pamixer -{i,d,t} 2; kill -34 $(cat ~/.cache/pidofbar)
 
- 
+# Change volume, chunky
+super + shift + Up
+    ~/.local/bin/changevolume up
+    
+super + shift + Down
+	~/.local/bin/changevolume down
+	
+super + shift + m
+	~/bin/changevolume mute
+    
+## Logout, shutdown, reboot
+super + X
+~/.local/bin/power
