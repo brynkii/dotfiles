@@ -1,2 +1,2 @@
 #!/bin/sh
-exec curl -L wttr.in/Thika
+exec curl -L wttr.in/Thika?0
