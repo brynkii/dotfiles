@@ -62,7 +62,7 @@ alt + shift + @s
 	scrot -s -e 'mv $f ~/Pictures/screenshots/'; \
 	notify-send 'Scrot' 'Selected image to ~/Pictures/screenshots'
 
-alt + s
+alt + @Print
 	scrot -e 'mv $f ~/Pictures/screenshots/'; \
 	notify-send 'Scrot' 'Image saved to ~/Pictures/screenshots/'
 	
@@ -85,15 +85,15 @@ XF86MonBrightness{Up,Down}
 ## Audio
 
 # Change volume, chunky
-super + shift + Up
+alt + shift + Up
     ~/.local/bin/changevolume up
     
-super + shift + Down
+alt + shift + Down
 	~/.local/bin/changevolume down
 	
-super + shift + m
-	~/bin/changevolume mute
+alt + shift + m
+	~/.local//bin/changevolume mute
     
 ## Logout, shutdown, reboot
-super + X
+alt + X
 ~/.local/bin/power
