@@ -56,7 +56,7 @@ alt + t
 #########
 # Scrot #
 #########
-@print
+@Print
 	flameshot gui
 alt + shift + @s
 	scrot -s -e 'mv $f ~/Pictures/screenshots/'; \
