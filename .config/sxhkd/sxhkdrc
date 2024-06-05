@@ -92,8 +92,8 @@ alt + shift + Down
 	~/.local/bin/changevolume down
 	
 alt + shift + m
-	~/.local//bin/changevolume mute
+	~/.local/bin/changevolume mute
     
 ## Logout, shutdown, reboot
-alt + X
+alt + x
 ~/.local/bin/power
