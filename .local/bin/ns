@@ -21,7 +21,7 @@ viewer=batcat
 peeker="sed 11q"
 
 # Remove command (rm, trash-cli, etc...)
-remove="/bin/rm"
+remove="/usr/bin/trash"
 
 
 # create notes directory if it doesn't exist
