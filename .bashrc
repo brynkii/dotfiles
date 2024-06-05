@@ -293,7 +293,7 @@ alias openports='netstat -nape --inet'
 # search
 alias h="history | grep "  # search command-line history
 alias f="find . | grep "   # search files in the current folder
-alias hist="history | fzf " # look at the command line history using fzf
+alias hist="history | fzf --reverse --tac " # look at the command line history using fzf
 
 # ----------------------------- functions ----------------------------
 
