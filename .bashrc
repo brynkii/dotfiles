@@ -269,7 +269,7 @@ alias lt='ls -ltrh'               # sort by date
 alias lw='ls -xAh'                # wide listing format
 alias ll='ls -Fls'                # long listing format
 alias labc='ls -lap'              #alphabetical sort
-alias lf="ls -l | egrep -v '^d'"  # files only
+alias lfi="ls -l | egrep -v '^d'"  # files only
 alias ldir="ls -l | egrep '^d'"   # directories only
 
 # show all logs in /var/log 
