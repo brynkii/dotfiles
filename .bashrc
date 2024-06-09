@@ -245,7 +245,6 @@ alias '???'=google
 alias dot='cd $DOTFILES'
 alias scripts='cd $SCRIPTS'
 alias snippets='cd $SNIPPETS'
-alias ls='ls -h --color=auto'
 alias free='free -h'
 alias df='df -h'
 alias diff='diff --color'
