@@ -10,6 +10,7 @@ Menu="$(ls -a $DIR1 $DIR2 | uniq -u \
     --margin=5% \
     --height 100% \
     --reverse \
+    --multi --cycle --preview 'man {1}' \
     --header="          PROGRAMS " --info=default)"
 
 exec $Menu
