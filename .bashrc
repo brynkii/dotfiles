@@ -22,7 +22,7 @@ _source_if() { [[ -r "$1" ]] && source "$1"; }
 
 export LANG=en_US.UTF-8 # assuming apt install language-pack-en done
 export USER="${USER:-$(whoami)}"
-export GITUSER="brynki01"
+export GITUSER="brynkii"
 export FTP=242
 export WEIGHT=83.7
 export HEIGHT=174
@@ -30,7 +30,7 @@ export REPOS="$HOME/repos"
 export GHREPOS="$REPOS/github/$GITUSER"
 export DOTFILES="$HOME/dotfiles"
 export SCRIPTS="$DOTFILES/local/bin"
-export SNIPPETS="$DOTFILES/snippets"
+export SNIPPETS="$DOTFILES/local/snippets"
 export HELP_BROWSER=lynx
 export DESKTOP="$HOME/Desktop"
 export DOCUMENTS="$HOME/Documents"
@@ -569,6 +569,8 @@ if [ -f /usr/share/bash-completion/bash_completion ]; then
 	. /usr/share/bash-completion/bash_completion
 elif [ -f /etc/bash_completion ]; then
 	. /etc/bash_completion
+elif [ -f $HOME/.local/share/bash_completion ]; then 
+	. $HOME/.local/share/bash_completion
 fi
 # remember last arg will be first in path
 pathprepend \
@@ -597,3 +599,7 @@ export NVM_DIR="$HOME/.nvm"
 . "$HOME/.cargo/env"
 
 source ~/.local/share/blesh/ble.sh
+
+# Configuring asdf
+. "$HOME/.asdf/asdf.sh"
+. "$HOME/.asdf/completions/asdf.bash"
