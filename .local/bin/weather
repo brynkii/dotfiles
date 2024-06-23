@@ -1,6 +1,6 @@
 #!/bin/bash
 
-
+currentVersion="1.1.0"
 LANG="${LANG:-en}"
 locale=$(echo "$LANG" | cut -c1-2)
 unset configuredClient
@@ -11,7 +11,7 @@ getConfiguredClient()
 {
   if command -v curl &>/dev/null; then
     configuredClient="curl"
-  elif command -v wget &>/dev/null; then
+  elif command -v wggit@github.com:alexanderepstein/Bash-Snippets.gitet &>/dev/null; then
     configuredClient="wget"
   elif command -v http &>/dev/null; then
     configuredClient="httpie"
