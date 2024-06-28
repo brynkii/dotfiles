@@ -2,8 +2,9 @@
 
 DIR1="/usr/bin"
 DIR2="/bin"
+DIR3="/usr/sbin"
 
-Menu="$(ls -a $DIR1 $DIR2 | uniq -u \
+Menu="$(ls -a $DIR1 $DIR2 $DIR3 | uniq -u \
     | fzf --prompt="Which Program Would You Like To Run?: " \
     --border=rounded \
     --color='bg:#1d2021,fg:#ebdbb2,hl:#444444' \
