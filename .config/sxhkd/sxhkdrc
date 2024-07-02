@@ -17,7 +17,7 @@ alt + shift + Return
 	
 # rofi network manager	
 alt + n
-	bash ~/bin/rofi-network-manager
+	bash ~/.local/bin/rofi-network-manager
 
 # help with shortcuts
 alt + h
@@ -95,5 +95,5 @@ alt + shift + m
 	~/.local/bin/changevolume mute
     
 ## Logout, shutdown, reboot
-alt + x
-~/.local/bin/power
+alt + p
+	~/.local/bin/power
