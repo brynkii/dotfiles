@@ -1,0 +1,97 @@
+# [Created by task 2.6.2 6/28/2024 13:58:21]
+# Taskwarrior program configuration file.
+# For more documentation, see https://taskwarrior.org or try 'man task', 'man task-color',
+# 'man task-sync' or 'man taskrc'
+
+# Here is an example of entries that use the default, override and blank values
+#   variable=foo   -- By specifying a value, this overrides the default
+#   variable=      -- By specifying no value, this means no default
+#   #variable=foo  -- By commenting out the line, or deleting it, this uses the default
+
+# You can also refence environment variables:
+#   variable=$HOME/task
+#   variable=$VALUE
+
+# Use the command 'task show' to see all defaults and overrides
+
+# Files
+data.location=/home/brian/.task
+
+# To use the default location of the XDG directories,
+# move this configuration file from ~/.taskrc to ~/.config/task/taskrc and uncomment below
+
+#data.location=~/.local/share/task
+#hooks.location=~/.config/task/hooks
+
+# Color theme (uncomment one to use)
+#include light-16.theme
+#include light-256.theme
+#include dark-16.theme
+#include dark-256.theme
+#include dark-red-256.theme
+#include dark-green-256.theme
+#include dark-blue-256.theme
+#include dark-violets-256.theme
+#include dark-yellow-green.theme
+#include dark-gray-256.theme
+#include dark-gray-blue-256.theme
+#include solarized-dark-256.theme
+#include solarized-light-256.theme
+#include no-color.theme
+
+# Adding some includes
+
+
+news.version=2.6.0
+
+# Basic config
+search.case.sensitive=no
+default.command=next limit:page
+default.project=inbox
+
+# Colors
+color.uda.priority.H=bold red
+color.uda.priority.M=blue
+color.uda.goal.year=bright red
+color.uda.goal.quarter=cyan
+color.uda.goal.month=rgb520
+color.tagged=yellow
+color.completed=green
+color.overdue=black on rgb500
+color.deleted=gray10
+color.recurring=magenta
+color.until=rgb102
+
+# goal scope
+uda.goal.label=Goal
+uda.goal.type=string
+uda.goal.values=year,quarter,month,
+
+# Workload
+uda.workload.label=Workload
+uda.workload.type=string
+uda.workload.values=H,,L
+
+# List all projects with `task projects`, including those completed
+list.all.projects=yes
+
+# Child tasks inherit their parent's urgency if that's higher.
+urgency.inherit=on
+
+# More sensible priorities, plz.
+uda.priority.values = H,M,,L
+urgency.uda.priority.L.coefficient=0
+urgency.uda.priority..coefficient=1.8
+
+# setting workload urgency
+urgency.uda.workload.L.coefficient=-.5
+urgency.uda.workload..coefficient=0
+urgency.uda.workload.H.coefficient=.5
+
+# How urgent something is depends upon what's waiting on it
+urgency.blocking.coefficient=0
+urgency.blocked.coefficient=0
+
+# Costly tasks are most important.
+urgency.user.tag.costly.coefficient=3.0
+
