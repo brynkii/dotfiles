@@ -65,7 +65,7 @@ color.until=rgb102
 # goal scope
 uda.goal.label=Goal
 uda.goal.type=string
-uda.goal.values=year,quarter,month,
+uda.goal.values=yearly,quarterly,monthly,weekly,daily
 
 # Workload
 uda.workload.label=Workload
