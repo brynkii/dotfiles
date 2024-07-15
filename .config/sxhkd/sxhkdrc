@@ -31,7 +31,7 @@ alt + l
 	slock
 
 alt + e
-	geany
+	~/.local/bin/emoji
 
 alt + g
 	gimp
