@@ -1,5 +1,35 @@
+# vi mode
+set editing-mode vi
+$if mode=vi
+  set keymap vi-command
+  set show-mode-in-prompt Off
+  # These are for vi-command mode
+  "\e[A":history-search-backward
+  "\e[B":history-search-forward
+  j:history-search-backward
+  k:history-search-forward
+  set keymap vi-insert
+  # these are for vi-insert mode
+  "\e[A":history-search-backward
+  "\e[B":history-search-forward
+$endif
+# color files by types
 set colored-stats On
 
+# Append char to indicate type
+set visible-stats On
+
+# Mark symlinked directories
+set mark-symlinked-directories On
+
+# Fix arrow keys on some system
+set enable-keypad On
+
+# Completion like zsh
+# If there are multiple matches for completion.
+# make TAB cycle through them and shift TAB (\e[Z) backwards.
+TAB: menu complete
+"\e[Z": menu-complete-backward
 set editing-mode vi
 set enable-bracketed-paste On
 set bell-style none 
