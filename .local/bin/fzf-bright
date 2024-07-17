@@ -1,0 +1,36 @@
+#!/bin/sh
+
+mylist() {
+cat <<EOF
+set +5%
+set 5%-
+set 5%
+set 10%
+set 15%
+set 20%
+set 25%
+set 30%
+set 35%
+set 40%
+set 45%
+set 50%
+set 55%
+set 60%
+set 65%
+set 70%
+set 75%
+set 80%
+set 85%
+set 90%
+set 95%
+set 100%
+EOF
+}
+
+export FZF_DEFAULT_OPTS="-e -i --info=hidden --layout=reverse --scroll-off=5 --tiebreak=index --bind 'home:first,end:last,tab:down,shift-tab:up'"
+selected="$(mylist | fzf --prompt="brightnessctl: ")"
+[ -z "$selected" ] && exit
+name=$(echo "$selected" | cut -f1 -d' ')
+action=$(echo "$selected" | cut -f2 -d' ')
+exec brightnessctl "$name" "$action"
+
