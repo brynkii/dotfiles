@@ -345,6 +345,12 @@ mvg() {
 	fi
 }
 
+# Create and go to the directory
+mkdirg() {
+	mkdir -p "$1"
+	cd "$1"
+}
+
 # Goes up a specified number of directories  (i.e. up 4)
 up() {
 	local d=""
@@ -592,6 +598,12 @@ eval "$(starship init bash)"
 fastfetch
 echo -ne "Hello $USER It's "; date '+%A, %B %-d %Y'
 echo -e "And now your moment of Zen:"; fortune
+
+# Check if the shell is interactive
+if [[ $- == *i* ]]; then
+    # Bind Ctrl+f to insert 'zi' followed by a newline
+    bind '"\C-f":"zi\n"'
+fi
 
 # installing Node
 export NVM_DIR="$HOME/.nvm"
