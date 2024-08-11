@@ -1,0 +1,134 @@
+#!/bin/sh
+
+
+# Loading bar functions - reffer to https://github.com/Kndndrj/shload
+shload_setup() {
+  shload_percent=$1
+  shload_symbol="$2"
+  shload_width=96
+  shload_delimiter=$shload_percent
+  while [ $(($shload_width + 20)) -gt $(tput cols) ]; do
+    shload_width=$(($shload_width / 2))
+    shload_delimiter=$(($shload_delimiter * 2))
+  done
+  shload_count=$shload_width
+  while [ $1 -lt $shload_count ]; do
+    shload_delimiter=$(($shload_delimiter * 2))
+    shload_symbol="$shload_symbol$shload_symbol"
+    shload_count=$(($shload_count / 2))
+  done
+  shload_completion_old=0
+  shload_bar=""
+  printf "\033[1;032mProgress:\033[0m\033[s [\033[${shload_width}C] 0%%"
+  shload_width=$(($shload_width + 1))
+}
+
+shload_update() {
+  shload_count=$(($1 * 100))
+  shload_completion=$(($shload_count / $shload_percent))
+  if [ $shload_completion -ne $shload_completion_old ]; then
+    if [ $shload_completion -lt 101 ]; then
+      shload_bar=$(printf "%0.s${shload_symbol}" $(seq -s " " 1 $(($shload_count / $shload_delimiter))))
+    else
+      shload_completion=100
+      shload_bar=$(printf "%0.s${shload_symbol}" $(seq -s " " 1 $(($((shload_percent * 100)) / shload_delimiter))))
+    fi
+    shload_completion_old=$shload_completion
+  fi
+  printf "\033[u [$shload_bar\033[u \033[${shload_width}C] $shload_completion%%"
+}
+
+#
+# Start of script
+#
+
+BLUE='\033[1;34m'
+NC='\033[0m'
+
+sep="
+"
+
+arguments="$@"
+[ -z "$arguments" ] && exit
+
+# Get the sources and destinations,
+# must take special action for some flags
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -t)
+      destination="$2"
+      shift 2;;
+    --target-directory=*)
+      destination="${1##*=}"
+      shift;;
+    -S)
+      args="$args -S $2"
+      shift 2;;
+    -*)
+      args="$args $1"
+      shift;;
+    *)
+      if [ -z "$sources" ]; then
+        sources="$1"
+      else
+        sources="$sources$sep$1"
+      fi
+      shift;;
+  esac
+done
+
+OIFS=$IFS
+IFS="$sep"
+# Get sources and destination 
+if [ -z "$destination" ]; then
+  destination="${sources##*$sep}"
+  sources="${sources%$sep*}"
+fi
+
+printf "${BLUE}Copy${NC}:\n$sources\n"
+printf "${BLUE}To${NC}:\n$destination\n"
+
+# Append source to destination for file size info later
+if [ -d "$destination" ]; then
+  for i in $sources; do
+    if [ -z "$new_destination" ]; then
+      new_destination="$destination/$(basename $i)"
+    else
+      new_destination="$new_destination$sep$destination/$(basename $i)"
+    fi
+  done
+fi
+IFS=$OIFS
+
+sources="$(printf "$sources" | awk '{ printf "\"%s\" ", $0 }')"
+destination="\"$destination\""
+
+# Perform a normal copy operation and get the pid
+cmd="cp $args $sources $destination"
+eval "$cmd &"
+cp_pid=$!
+
+# Get sources size
+sources_size=$(eval "du -cd 0 "$sources"" | tail -n 1 | awk '{print $1}')
+
+# One more safety
+if [ $sources_size -eq 0 ]; then
+  printf "=====\n"
+  exit 0
+fi
+
+# Start the loading bar
+shload_setup $sources_size "="
+
+# Print the output while the process exists,
+# Kill the process if interrupt signal is recieved
+trap "kill $cp_pid; exit" 2
+while [ -e "/proc/$cp_pid" ]; do
+  destination_size=$(eval "du -cd 0 "$destination"" | tail -n 1 | awk '{print $1}')
+  shload_update $destination_size
+  sleep 0.5
+done 2>/dev/null
+
+# print 100% (fix for smaller files)
+shload_update $sources_size
+printf "\n"
