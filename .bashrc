@@ -257,19 +257,35 @@ alias coin="xclip '(yes|no)'"
 alias more="less"
 
 # aliases for multiple directory listing commands
-alias la='ls -Alh'                # show hidden files
-alias ls='ls -aFh --color=always' # add colors and file type extensions
-alias lx='ls -lXBh'               # sort by extension
-alias lk='ls -lSrh'               # sort by size
-alias lc='ls -lcrh'               # sort by change time
-alias lu='ls -lurh'               # sort by access time
-alias lr='ls -lRh'                # recursive ls
-alias lt='ls -ltrh'               # sort by date
-alias lw='ls -xAh'                # wide listing format
-alias ll='ls -Fls'                # long listing format
-alias labc='ls -lap'              #alphabetical sort
-alias lfi="ls -l | egrep -v '^d'"  # files only
-alias ldir="ls -l | egrep '^d'"   # directories only
+if [ -n "$(command -v eza 2>&1)" ]; then
+	alias ls="eza -Ah --icons --color=always --group-directories-first --show-symlinks"
+	alias la="eza -Alh --icons"
+	alias lx='eza -lXBh --icons'               # sort by extension
+	alias lk='eza -lSrh --icons'               # sort by size
+	alias lc='eza -lcrh --icons'               # sort by change time
+	alias lu='eza -lurh --icons'               # sort by access time
+	alias lr='eza -lRh --icons'                # recursive eza
+	alias lt='eza -ltrh --icons'               # sort by date
+	alias lw='eza -xAh --icons'                # wide listing format
+	alias ll='eza -l --icons --git --git-repos --changed'                # long listing format
+	alias labc='eza -lap --icons'              #alphabetical sort
+	alias lfi='eza -f --icons'  # files only
+	alias ldir='eza -D --icons'   # directories only
+else
+	alias la='ls -Alh'                # show hidden files
+	alias ls='ls -aFh --color=always' # add colors and file type extensions
+	alias lx='ls -lXBh'               # sort by extension
+	alias lk='ls -lSrh'               # sort by size
+	alias lc='ls -lcrh'               # sort by change time
+	alias lu='ls -lurh'               # sort by access time
+	alias lr='ls -lRh'                # recursive ls
+	alias lt='ls -ltrh'               # sort by date
+	alias lw='ls -xAh'                # wide listing format
+	alias ll='ls -Fls'                # long listing format
+	alias labc='ls -lap'              #alphabetical sort
+	alias lfi="ls -l | egrep -v '^d'"  # files only
+	alias ldir="ls -l | egrep '^d'"   # directories only
+fi
 
 # show all logs in /var/log 
 alias logs="sudo find /var/log -type f -exec file {} \; | grep 'text' | cut -d' ' -f1 | sed -e's/:$//g' | grep -v '[0-9]$' | xargs tail -f"
@@ -293,6 +309,11 @@ alias openports='netstat -nape --inet'
 alias h="history | grep "  # search command-line history
 alias f="find . | grep "   # search files in the current folder
 alias hist="history | fzf --reverse --tac " # look at the command line history using fzf
+
+# cat alias
+if [ -n "$(command -v batcat 2>&1)" ]; then
+	alias cat="batcat"
+fi
 
 # ----------------------------- functions ----------------------------
 
