@@ -260,15 +260,15 @@ alias more="less"
 if [ -n "$(command -v eza 2>&1)" ]; then
 	alias ls="eza -Ah --icons --color=always --group-directories-first --show-symlinks"
 	alias la="eza -Alh --icons"
-	alias lx='eza -lXBh --icons'               # sort by extension
-	alias lk='eza -lSrh --icons'               # sort by size
-	alias lc='eza -lcrh --icons'               # sort by change time
-	alias lu='eza -lurh --icons'               # sort by access time
+	alias lx='eza -lBh --icons --sort=extension'               # sort by extension
+	alias lk='eza -lSh --icons --sort=size'               # sort by size
+	alias lc='eza -lrh --icons --sort=changed'               # sort by change time
+	alias lu='eza -lrh --icons --sort=accessed'               # sort by access time
 	alias lr='eza -lRh --icons'                # recursive eza
-	alias lt='eza -ltrh --icons'               # sort by date
+	alias lt='eza -l --icons --sort=newest'               # sort by date
 	alias lw='eza -xAh --icons'                # wide listing format
-	alias ll='eza -l --icons --git --git-repos --changed'                # long listing format
-	alias labc='eza -lap --icons'              #alphabetical sort
+	alias ll='eza -l --icons --git --git-repos --changed --total-size'                # long listing format
+	alias labc='eza -la --icons --sort=name --group-directories-first'              #alphabetical sort
 	alias lfi='eza -f --icons'  # files only
 	alias ldir='eza -D --icons'   # directories only
 else
