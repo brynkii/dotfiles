@@ -68,6 +68,7 @@ export LESS_TERMCAP_us="[4m"  # underline
 export ANSIBLE_CONFIG="$HOME/.config/ansible/config.ini"
 export ANSIBLE_INVENTORY="$HOME/.config/ansible/inventory.yaml"
 export ANSIBLE_LOAD_CALLBACK_PLUGINS=1
+export MANPAGER="less -R --use-color -Dd+r -Du+b"
 #export ANSIBLE_STDOUT_CALLBACK=json
 
 #export DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock
