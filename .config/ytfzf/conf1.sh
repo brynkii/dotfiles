@@ -135,7 +135,6 @@ fancy_subscriptions_menu=1
 #history is the same as -H
 #yt_subs is the same as -S
 #trending is the same as -T
-scrape="yt_search"
 
 #sort videos, history, and subscriptions by date from newest to oldest
 sort_videos_data=0

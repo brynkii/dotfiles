@@ -3,7 +3,7 @@
 #####################
 
 alt + f
-    firefox-esr
+    ~/.local/bin/font-awesome
 
 alt + Return
 	kitty
