@@ -29,11 +29,11 @@ return {
 					"tsx",
 					"typescript",
 					"vim",
-          "go",
-          "vimdoc",
-          "python",
-          "perl",
-          "rust"
+					"go",
+					"vimdoc",
+					"python",
+					"perl",
+					"rust",
 
 					-- "yaml", This is currently borked see: https://github.com/ikatyang/tree-sitter-yaml/issues/53
 				},
