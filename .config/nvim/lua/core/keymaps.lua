@@ -6,7 +6,7 @@ local keymap = vim.keymap
 -- General keymaps
 keymap.set("i", "jk", "<ESC>") -- exit insert mode with jk
 keymap.set("n", "gu", ":!open <c-r><c-a><CR>") -- open URL under cursor
-keymap.set("n", "<Esc>", "<cmd>nohlsearch<CR>")
+keymap.set("n", "<Esc>", "<cmd>nohlsearch<CR>") -- Clear highlights on search when pressing <ESC> in normal mode.
 keymap.set("t", "<Esc><Esc>", "<C-\\><C-n>", { desc = "Exit terminal mode" })
 
 -- Split window management
