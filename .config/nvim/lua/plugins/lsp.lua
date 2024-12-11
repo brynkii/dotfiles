@@ -9,7 +9,7 @@ return {
       { path = 'luvit-meta/library', words = { 'vim%.uv' } },
     },
   },
-}, { 'Bilal2453/luvit-meta', lazy = true }, {
+  { 'Bilal2453/luvit-meta', lazy = true }, {
   -- Main LSP Configuration
   'neovim/nvim-lspconfig',
   dependencies = {
@@ -231,4 +231,5 @@ return {
       },
     }
   end,
+  },
 }
