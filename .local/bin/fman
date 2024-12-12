@@ -9,7 +9,7 @@ man -k . \
     -q "$1" \
     --ansi \
     --prompt=' Man > ' \
-    --preview-window down \
+    --preview-window '50%,rounded,<50(down,80%,border-bottom)' \
     --preview $'echo {} | tr -d \'()\' | awk \'{printf "%s ", $2} {print $1}\' | xargs -r man' \
     --bind "ctrl-b:+change-preview(man {1} | col -bx | batcat --language=man --plain --color always --theme=\"Monokai Extended\")+change-prompt( Man >)" \
     --bind "ctrl-t:+change-preview(tldr --color=always {1})+change-prompt( TLDR > )" \
