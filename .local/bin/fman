@@ -1,6 +1,16 @@
 #!/bin/bash
 
+GREEN='\e[32m'
+YELLOW='\e[33m'
+
 export FZF_DEFAULT_OPTS="-e -i --info=default --cycle --layout=reverse --scroll-off=5 --preview-window=wrap --tiebreak=index --bind  'home:first,end:last,tab:down,shift-tab:up'"
-man -k . | fzf -q "$1" --prompt='manpages: ' --preview-window down \
-  --preview $'echo {} | tr -d \'()\' | awk \'{printf "%s ", $2} {print $1}\' | xargs -r man' \
+man -k . \
+  | fzf  \
+    -q "$1" \
+    --ansi \
+    --prompt=' Man > ' \
+    --preview-window down \
+    --preview $'echo {} | tr -d \'()\' | awk \'{printf "%s ", $2} {print $1}\' | xargs -r man' \
+    --bind "ctrl-b:+change-preview(man {1} | col -bx | batcat --language=man --plain --color always --theme=\"Monokai Extended\")+change-prompt( Man >)" \
+    --bind "ctrl-t:+change-preview(tldr --color=always {1})+change-prompt( TLDR > )" \
   | tr -d '()' | awk '{printf "%s ", $2} {print $1}' | xargs -r man
