@@ -1,8 +1,5 @@
 #!/bin/bash
 
-GREEN='\e[32m'
-YELLOW='\e[33m'
-
 export FZF_DEFAULT_OPTS="-e -i --info=default --cycle --layout=reverse --scroll-off=5 --preview-window=wrap --tiebreak=index --bind  'home:first,end:last,tab:down,shift-tab:up'"
 man -k . \
   | fzf  \
