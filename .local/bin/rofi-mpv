@@ -1,0 +1,39 @@
+#!/bin/bash
+
+# Directory containing movies
+MOVIE_DIR="$HOME/Videos/movies"
+
+# Check if the directory exists
+if [ ! -d "$MOVIE_DIR" ]; then
+  echo "Error: Directory $MOVIE_DIR does not exist."
+  exit 1
+fi
+
+# List movies in the directory
+MOVIES=$(find "$MOVIE_DIR" -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.avi" -o -iname "*.mov" \) | sort)
+
+# Check if there are any movies
+if [ -z "$MOVIES" ]; then
+  echo "No movies found in $MOVIE_DIR."
+  exit 1
+fi
+
+# Create a mapping of movie names to full paths
+MOVIE_NAMES=$(echo "$MOVIES" | awk -F'/' '{print $NF}')
+MOVIE_MAP=$(paste -d '|' <(echo "$MOVIE_NAMES") <(echo "$MOVIES"))
+
+# Use rofi to select a movie
+SELECTED_MOVIE_NAME=$(echo "$MOVIE_NAMES" | rofi -dmenu -i -p "Select a movie:")
+
+# Check if a movie was selected
+if [ -z "$SELECTED_MOVIE_NAME" ]; then
+  echo "No movie selected."
+  exit 0
+fi
+
+# Map the selected name back to the full path
+SELECTED_MOVIE=$(echo "$MOVIE_MAP" | grep -F "$SELECTED_MOVIE_NAME" | awk -F'|' '{print $2}')
+
+# Play the selected movie with mpv
+mpv "$SELECTED_MOVIE"
+
