@@ -51,6 +51,11 @@ alt + o
 alt + t
 	thunar
 
+alt + w
+	bash ~/.local/bin/rofi-mpv
+	
+alt + r
+	bash ~/.local/bin/rofi-books
 
 
 #########

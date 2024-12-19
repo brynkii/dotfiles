@@ -1,0 +1,57 @@
+#!/bin/bash
+
+# Default directory containing books
+BOOK_DIR="$HOME/Documents/books"
+
+# Allow the user to specify a directory via command-line argument
+if [ $# -ge 1 ]; then
+  BOOK_DIR="$1"
+fi
+
+# Check if the directory exists
+if [ ! -d "$BOOK_DIR" ]; then
+  echo "Error: Directory $BOOK_DIR does not exist."
+  exit 1
+fi
+
+# List books in the directory
+BOOKS=$(find "$BOOK_DIR" -type f \( -iname "*.pdf" -o -iname "*.epub" \) | sort)
+
+# Check if there are any books
+if [ -z "$BOOKS" ]; then
+  echo "No books found in $BOOK_DIR."
+  exit 1
+fi
+
+# Create a mapping of book names to full paths
+BOOK_NAMES=$(echo "$BOOKS" | awk -F'/' '{print $NF}')
+BOOK_MAP=$(paste -d '|' <(echo "$BOOK_NAMES") <(echo "$BOOKS"))
+
+# Use rofi to select a book
+SELECTED_BOOK_NAME=$(echo "$BOOK_NAMES" | rofi -dmenu -i -p "Select a book:")
+
+# Check if a book was selected
+if [ -z "$SELECTED_BOOK_NAME" ]; then
+  echo "No book selected."
+  exit 0
+fi
+
+# Map the selected name back to the full path
+SELECTED_BOOK=$(echo "$BOOK_MAP" | grep -F "$SELECTED_BOOK_NAME" | awk -F'|' '{print $2}')
+
+# Open the selected book with the appropriate reader
+if [[ "$SELECTED_BOOK" == *.pdf ]]; then
+  if ! zathura "$SELECTED_BOOK"; then
+    echo "Error: Failed to open the book $SELECTED_BOOK with zathura."
+    exit 1
+  fi
+elif [[ "$SELECTED_BOOK" == *.epub ]]; then
+  if ! foliate "$SELECTED_BOOK"; then
+    echo "Error: Failed to open the book $SELECTED_BOOK with foliate."
+    exit 1
+  fi
+else
+  echo "Error: Unsupported file format."
+  exit 1
+fi
+

@@ -4,6 +4,8 @@
  *******************************************************/
 
 configuration {
+    modi: "drun,run,filebrowser,window";
+    terminal: "st";
     font:				"JetBrainsMono Nerd Font 10";
     show-icons:				true;
     icon-theme:				"Fluent-dark";
