@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+
+# Directory for bookmarks
+BOOKMARK_DIR="$HOME/.local/share/bookmark"
+mkdir -p "$BOOKMARK_DIR"
+
+# Bookmark file
+BOOKMARK_FILE="$BOOKMARK_DIR/bookmarks.txt"
+
+
+# Browser
+BROWSER="firefox"
+DELIMITER=$'\x1F'
+
+add_bookmark() {
+  local selection
+  selection=$(xclip -o) || return
+
+  if [[ -z "$selection" ]]; then
+    notify-send "No text selected"
+    return
+  fi
+
+  local title
+  read -r -p "Enter bookmark title/description: " title
+
+  if [[ -z "$title" && $(printf '%s' "$selection" | wc -l) -gt 1 ]]; then
+    notify-send "Title is required for multi-line bookmarks"
+    return
+  fi
+
+  if [[ -z "$title" ]]; then
+    title="$selection"
+  fi
+
+  title=$(printf '%s' "$title" | sed 's/'"$DELIMITER"'/\\&/g')
+  selection=$(printf '%s' "$selection" | sed 's/'"$DELIMITER"'/\\&/g')
+
+  local tags
+  read -r -p "Enter tags (comma-separated, optional): " tags
+
+  tags=$(printf '%s' "$tags" | sed 's/,/, /g' | sed 's/ //g' | sed 's/,+/,/g' | sed 's/^,//' | sed 's/,*$//')
+  tags=$(printf '%s' "$tags" | sed 's/'"$DELIMITER"'/\\&/g')
+
+  local type
+  if [[ $(printf '%s' "$selection" | wc -l) -eq 1 ]]; then
+    type=1
+    if grep -q "^$type$DELIMITER$title$DELIMITER$selection$DELIMITER$tags$" "$BOOKMARK_FILE"; then
+      notify-send "Bookmark already exists: $title"
+      return
+    fi
+    printf '%s\n' "$type$DELIMITER$title$DELIMITER$selection$DELIMITER$tags" >> "$BOOKMARK_FILE"
+  else
+    type=0
+    local filename
+    filename=$(printf '%s %s' "$title" "$(date +%s)" | sha256sum | cut -d' ' -f1)
+    printf '%s' "$selection" > "$BOOKMARK_DIR/$filename"
+    if grep -q "^$type$DELIMITER$title$DELIMITER$filename$DELIMITER$tags$" "$BOOKMARK_FILE"; then
+      notify-send "Bookmark already exists: $title"
+      return
+    fi
+    printf '%s\n' "$type$DELIMITER$title$DELIMITER$filename$DELIMITER$tags" >> "$BOOKMARK_FILE"
+  fi
+
+  notify-send "Bookmark Added: $title"
+}
+list_bookmarks() {
+    if [[ ! -f "$BOOKMARK_FILE" ]]; then
+        touch "$BOOKMARK_FILE"
+    fi
+    local choices=()
+    while IFS="$DELIMITER" read -r type title data tags; do
+        title=$(printf '%s' "$title" | sed 's/\\&/'"$DELIMITER"'/g')
+        choices+=("$title")
+    done < "$BOOKMARK_FILE"
+
+    if [[ ${#choices[@]} -eq 0 ]]; then
+        notify-send "No bookmarks saved"
+        return
+    fi
+
+    local search_term
+    read -r -p "Search bookmarks (or press Enter for all, start with # to search tags): " search_term
+
+    local filtered_choices=()
+    while IFS="$DELIMITER" read -r type title data tags; do
+        title=$(printf '%s' "$title" | sed 's/\\&/'"$DELIMITER"'/g')
+        tags=$(printf '%s' "$tags" | sed 's/\\&/'"$DELIMITER"'/g')
+        if [[ -z "$search_term" ]]; then
+            filtered_choices+=("$title")
+        elif [[ "$search_term" == \#* ]]; then # Search by tag
+            local tag_to_search="${search_term:1}" # Remove the '#'
+            if [[ "$tags" == *$tag_to_search* ]]; then
+                filtered_choices+=("$title")
+            fi
+        elif [[ "$title" == *"$search_term"* ]]; then # Search by title
+            filtered_choices+=("$title")
+        fi
+    done < "$BOOKMARK_FILE"
+
+        if [[ ${#filtered_choices[@]} -eq 0 ]]; then
+        notify-send "No bookmarks found matching '$search_term'"
+        return
+    fi
+
+    local choice_index
+    choice_index=$(printf "%s\n" "${filtered_choices[@]}" | rofi -dmenu -p "Bookmarks:" -format i)
+
+    if [[ -n "$choice_index" ]]; then
+        local type title data tags
+        IFS="$DELIMITER" read -r type title data tags < <(sed -n "$((choice_index + 1))p" "$BOOKMARK_FILE")
+        title=$(printf '%s' "$title" | sed 's/\\&/'"$DELIMITER"'/g')
+        data=$(printf '%s' "$data" | sed 's/\\&/'"$DELIMITER"'/g')
+        tags=$(printf '%s' "$tags" | sed 's/\\&/'"$DELIMITER"'/g')
+
+        local action
+        action=$(printf '%s\n' "Open" "Delete" "Show Tags" | rofi -dmenu -p "Action:")
+
+        if [[ "$action" == "Open" ]]; then
+            if [[ "$type" -eq 1 ]]; then
+                if [[ "$data" =~ ^(https?://)?([a-z0-9.-]+\.[a-z]{2,})(/[^\s]*)?$ ]]; then
+                    "$BROWSER" "$data" &
+                else
+                    printf '%s' "$data" | xclip -i -selection clipboard
+                    notify-send "Copied to clipboard: $data"
+                fi
+            else
+                local content
+                content=$(cat "$BOOKMARK_DIR/$data") || { notify-send "Error reading bookmark file"; return; }
+                printf '%s\n' "$content" | xclip -i -selection clipboard
+                notify-send "Multi-line bookmark copied to clipboard: $title"
+            fi
+        elif [[ "$action" == "Delete" ]]; then
+            if [[ "$type" -eq 0 ]]; then
+              rm -f "$BOOKMARK_DIR/$data"
+              notify-send "Multi-line bookmark and file deleted: $title"
+            else
+                notify-send "Bookmark deleted: $title"
+            fi
+            awk -v line="$((choice_index + 1))" 'NR != line' "$BOOKMARK_FILE" > "$BOOKMARK_FILE.tmp" && mv "$BOOKMARK_FILE.tmp" "$BOOKMARK_FILE"
+        elif [[ "$action" == "Show Tags" ]]; then
+            notify-send "Tags for $title: $tags"
+        fi
+    fi
+}
+
+export_bookmarks() {
+  local bookmarks=()
+  while IFS="$DELIMITER" read -r type title data tags; do
+    bookmarks+=("{ \"type\": $type, \"title\": \"$(jq -n --arg t "$title" '$t | @json')\", \"data\": \"$(jq -n --arg d "$data" '$d | @json')\", \"tags\": \"$(jq -n --arg tg "$tags" '$tg | @json')\" }")
+  done < "$BOOKMARK_FILE"
+
+  printf "[\n%s\n]\n" "$(printf ",\n" "${bookmarks[@]}")"
+}
+
+import_bookmarks() {
+    local json_data
+    read -r -d '' json_data
+
+    if [[ -z "$json_data" ]]; then
+        notify-send "No JSON data provided"
+        return
+    fi
+
+    local -a bookmarks
+    bookmarks=($(jq -r '.[] | [.type, .title, .data, .tags] | @tsv' <<< "$json_data" 2>/dev/null))
+    if [[ $? -ne 0 ]]; then
+        notify-send "Invalid JSON data"
+        return
+    fi
+
+    if [[ ${#bookmarks[@]} -eq 0 ]]; then
+        notify-send "No bookmarks found in JSON data"
+        return
+    fi
+
+    for bookmark in "${bookmarks[@]}"; do
+        IFS=$'\t' read -r type title data tags <<< "$bookmark"
+
+    #Unescape the delimiter
+                title=$(printf '%s' "$title" | sed 's/\\&/'"$DELIMITER"'/g')
+                data=$(printf '%s' "$data" | sed 's/\\&/'"$DELIMITER"'/g')
+                tags=$(printf '%s' "$tags" | sed 's/\\&/'"$DELIMITER"'/g')
+
+        if [[ "$type" -eq 0 ]]; then
+            printf '%s' "$data" > "$BOOKMARK_DIR/$data"
+        fi
+        if grep -q "^$type$DELIMITER$title$DELIMITER$data$DELIMITER$tags$" "$BOOKMARK_FILE"; then
+            notify-send "Bookmark already exists: $title"
+            continue # Skip to the next bookmark
+        fi
+        printf '%s\n' "$type$DELIMITER$title$DELIMITER$data$DELIMITER$tags" >> "$BOOKMARK_FILE"
+    done
+    notify-send "Bookmarks imported"
+}
+main() {
+  case "$1" in
+    add)
+      add_bookmark
+      ;;
+    list)
+      list_bookmarks
+      ;;
+    export)
+      export_bookmarks > bookmarks.json
+      notify-send "Bookmarks exported to bookmarks.json"
+      ;;
+    import)
+      import_bookmarks < import.json
+      ;;
+    *)
+      printf 'Usage: %s {add|list|export|import}\n' "$0"
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
+
+exit 0
