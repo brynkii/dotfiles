@@ -596,6 +596,9 @@ eval "$(zoxide init bash)"
 # install starship
 eval "$(starship init bash)"
 
+# fzf defaults
+export FZF_DEFAULT_OPTS="-e -i --info=default --cycle --scroll-off=5 --preview-window=wrap --bind  'home:first,end:last'"
+
 # Welcome message
 fastfetch
 echo -ne "Hello $USER It's "; date '+%A, %B %-d %Y'
@@ -618,3 +621,6 @@ source ~/.local/share/blesh/ble.sh
 # Configuring asdf
 . "$HOME/.asdf/asdf.sh"
 . "$HOME/.asdf/completions/asdf.bash"
+
+# Configuring direnv
+eval "$(direnv hook bash)"
