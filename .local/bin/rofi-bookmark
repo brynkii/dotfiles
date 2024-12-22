@@ -64,48 +64,54 @@ add_bookmark() {
 
   notify-send "Bookmark Added: $title"
 }
+
 list_bookmarks() {
-    if [[ ! -f "$BOOKMARK_FILE" ]]; then
-        touch "$BOOKMARK_FILE"
-    fi
+    # Ensure the bookmark file exists
+    [[ -f "$BOOKMARK_FILE" ]] || touch "$BOOKMARK_FILE"
+
+    # Read bookmarks into an array
     local choices=()
     while IFS="$DELIMITER" read -r type title data tags; do
         title=$(printf '%s' "$title" | sed 's/\\&/'"$DELIMITER"'/g')
         choices+=("$title")
     done < "$BOOKMARK_FILE"
 
+    # Notify if no bookmarks exist
     if [[ ${#choices[@]} -eq 0 ]]; then
         notify-send "No bookmarks saved"
-        return
+        return 1
     fi
 
+    # Prompt for search term
     local search_term
-    read -r -p "Search bookmarks (or press Enter for all, start with # to search tags): " search_term
+    search_term=$(rofi -dmenu -p "Search bookmarks (Enter for all, # for tags):")
 
+    # Filter bookmarks based on the search term
     local filtered_choices=()
     while IFS="$DELIMITER" read -r type title data tags; do
         title=$(printf '%s' "$title" | sed 's/\\&/'"$DELIMITER"'/g')
         tags=$(printf '%s' "$tags" | sed 's/\\&/'"$DELIMITER"'/g')
         if [[ -z "$search_term" ]]; then
             filtered_choices+=("$title")
-        elif [[ "$search_term" == \#* ]]; then # Search by tag
+        elif [[ "$search_term" == \#* ]]; then # Search by tags
             local tag_to_search="${search_term:1}" # Remove the '#'
-            if [[ "$tags" == *$tag_to_search* ]]; then
-                filtered_choices+=("$title")
-            fi
+            [[ "$tags" == *"$tag_to_search"* ]] && filtered_choices+=("$title")
         elif [[ "$title" == *"$search_term"* ]]; then # Search by title
             filtered_choices+=("$title")
         fi
     done < "$BOOKMARK_FILE"
 
-        if [[ ${#filtered_choices[@]} -eq 0 ]]; then
+    # Notify if no matches found
+    if [[ ${#filtered_choices[@]} -eq 0 ]]; then
         notify-send "No bookmarks found matching '$search_term'"
-        return
+        return 1
     fi
 
+    # Display filtered choices in rofi
     local choice_index
     choice_index=$(printf "%s\n" "${filtered_choices[@]}" | rofi -dmenu -p "Bookmarks:" -format i)
 
+    # Process selected bookmark
     if [[ -n "$choice_index" ]]; then
         local type title data tags
         IFS="$DELIMITER" read -r type title data tags < <(sed -n "$((choice_index + 1))p" "$BOOKMARK_FILE")
@@ -113,34 +119,45 @@ list_bookmarks() {
         data=$(printf '%s' "$data" | sed 's/\\&/'"$DELIMITER"'/g')
         tags=$(printf '%s' "$tags" | sed 's/\\&/'"$DELIMITER"'/g')
 
+        # Action menu
         local action
-        action=$(printf '%s\n' "Open" "Delete" "Show Tags" | rofi -dmenu -p "Action:")
+        action=$(printf "Open\nDelete\nShow Tags" | rofi -dmenu -p "Action:")
 
-        if [[ "$action" == "Open" ]]; then
-            if [[ "$type" -eq 1 ]]; then
-                if [[ "$data" =~ ^(https?://)?([a-z0-9.-]+\.[a-z]{2,})(/[^\s]*)?$ ]]; then
-                    "$BROWSER" "$data" &
+        case "$action" in
+            "Open")
+                if [[ "$type" -eq 1 ]]; then
+                    if [[ "$data" =~ ^https?:// ]]; then
+                        "$BROWSER" "$data" &
+                    else
+                        printf '%s' "$data" | xclip -i -selection clipboard
+                        notify-send "Copied to clipboard: $data"
+                    fi
                 else
-                    printf '%s' "$data" | xclip -i -selection clipboard
-                    notify-send "Copied to clipboard: $data"
+                    local content
+                    content=$(cat "$BOOKMARK_DIR/$data" 2>/dev/null) || {
+                        notify-send "Error reading bookmark file"
+                        return 1
+                    }
+                    printf '%s\n' "$content" | xclip -i -selection clipboard
+                    notify-send "Multi-line bookmark copied: $title"
                 fi
-            else
-                local content
-                content=$(cat "$BOOKMARK_DIR/$data") || { notify-send "Error reading bookmark file"; return; }
-                printf '%s\n' "$content" | xclip -i -selection clipboard
-                notify-send "Multi-line bookmark copied to clipboard: $title"
-            fi
-        elif [[ "$action" == "Delete" ]]; then
-            if [[ "$type" -eq 0 ]]; then
-              rm -f "$BOOKMARK_DIR/$data"
-              notify-send "Multi-line bookmark and file deleted: $title"
-            else
-                notify-send "Bookmark deleted: $title"
-            fi
-            awk -v line="$((choice_index + 1))" 'NR != line' "$BOOKMARK_FILE" > "$BOOKMARK_FILE.tmp" && mv "$BOOKMARK_FILE.tmp" "$BOOKMARK_FILE"
-        elif [[ "$action" == "Show Tags" ]]; then
-            notify-send "Tags for $title: $tags"
-        fi
+                ;;
+            "Delete")
+                if [[ "$type" -eq 0 ]]; then
+                    rm -f "$BOOKMARK_DIR/$data"
+                    notify-send "Multi-line bookmark file deleted: $title"
+                else
+                    notify-send "Bookmark deleted: $title"
+                fi
+                awk -v line="$((choice_index + 1))" 'NR != line' "$BOOKMARK_FILE" > "$BOOKMARK_FILE.tmp" && mv "$BOOKMARK_FILE.tmp" "$BOOKMARK_FILE"
+                ;;
+            "Show Tags")
+                notify-send "Tags for $title: $tags"
+                ;;
+            *)
+                notify-send "No action selected"
+                ;;
+        esac
     fi
 }
 
