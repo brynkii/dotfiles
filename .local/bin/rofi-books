@@ -1,57 +1,255 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Default directory containing books
 BOOK_DIR="$HOME/Documents/books"
 
-# Allow the user to specify a directory via command-line argument
-if [ $# -ge 1 ]; then
-  BOOK_DIR="$1"
+# Configurable readers
+PDF_READER="${PDF_READER:-zathura}"
+EPUB_READER="${EPUB_READER:-foliate}"
+CB_READER="${CB_READER:-zathura}"
+DJVU_READER="${DJVU_READER:-zathura}"
+
+# Recent books file and log file (now CSV)
+RECENT_BOOKS_FILE="$HOME/.local/share/books/recent_books.txt"
+BOOK_LOG_FILE="$HOME/.local/share/books/book_log.csv"
+mkdir -p "$(dirname "$RECENT_BOOKS_FILE")"
+mkdir -p "$(dirname "$BOOK_LOG_FILE")"
+
+# Function to add to recent books
+add_to_recent_books() {
+  local book="$1"
+  grep -q -F "$book" "$RECENT_BOOKS_FILE" && return
+  printf "%s\n" "$book" >> "$RECENT_BOOKS_FILE"
+  tail -n 10 "$RECENT_BOOKS_FILE" > "$RECENT_BOOKS_FILE.tmp" && mv "$RECENT_BOOKS_FILE.tmp" "$RECENT_BOOKS_FILE"
+}
+
+# Function to log to CSV (now updates or inserts)
+log_book() {
+    local book="$1"
+    local start_time="$2"
+    local end_time="$3"
+    local finished="$4"
+    local rating="$5"
+
+    # Escape commas in book name for CSV compatibility
+    local escaped_book=$(printf '%s' "$book" | sed 's/,/\\,/g')
+
+    # Check if the log file exists and has a header. If not, create it.
+    if [[ ! -s "$BOOK_LOG_FILE" ]]; then
+        printf "Book,Start Time,End Time,Time Spent,Finished,Rating,Access Count\n" > "$BOOK_LOG_FILE"
+    fi
+
+    # Use awk to find and update or create a new entry
+    awk -F',' -v book="$escaped_book" -v start_time="$start_time" -v end_time="$end_time" -v finished="$finished" -v rating="$rating" '
+        $1 == book {
+            total_time_spent = $4 + (strftime("%s", end_time) - strftime("%s", start_time));
+            if (finished != "n") $5 = finished;
+            if (rating != "") $6 = rating;
+            $7++;
+            printf "%s,%s,%s,%s,%s,%s,%s\n", $1, $2, end_time, total_time_spent, $5,$6, $7 > "temp.csv";
+            next;
+        }
+        {print >> "temp.csv"}
+        END {
+            if (!found) {
+                printf "%s,%s,%s,%s,%s,%s,1\n", book, start_time, end_time, (strftime("%s", end_time) - strftime("%s", start_time)), finished, rating >> "temp.csv";
+            }
+        }
+    ' "$BOOK_LOG_FILE"
+    mv "temp.csv" "$BOOK_LOG_FILE"
+}
+
+# ... (Rest of the script)
+
+# Time tracking and logging (using CSV)
+#start_time=$(date +%Y-%m-%d_%H:%M:%S) # Detailed start time
+# ... (Open the book)
+#end_time=$(date +%Y-%m-%d_%H:%M:%S)   # Detailed end time
+
+# ... (Prompt for finished and rating)
+
+#log_book "$book_name" "$start_time" "$end_time" "$finished" "$rating"
+#!/usr/bin/env bash
+
+# ... (Other parts of the script: variables, functions, argument parsing, finding books, rofi selection, add_to_recent_books, log_book)
+seconds_to_human() {
+    local seconds="$1"
+    local days=$((seconds / 86400))
+    seconds=$((seconds % 86400))
+    local hours=$((seconds / 3600))
+    seconds=$((seconds % 3600))
+    local minutes=$((seconds / 60))
+    seconds=$((seconds % 60))
+
+    printf '%d days %d hours %d minutes %d seconds\n' "$days" "$hours" "$minutes" "$seconds" | sed 's/\<0 [a-z]*//g'
+}
+
+analyze_log() {
+    if [[ ! -s "$BOOK_LOG_FILE" ]]; then
+        printf "No log file found.\n"
+        return 1
+    fi
+    # Check if the log file contains only the header
+    if [[ $(wc -l < "$BOOK_LOG_FILE") -eq 1 ]]; then
+        printf "No reading data found in the log file.\n"
+        return 1
+    fi
+
+    local total_time
+    local total_time_human
+    local output=""
+
+    # Calculate total reading time
+    total_time=$(awk -F',' '{sum += $4} END {print sum}' "$BOOK_LOG_FILE")
+    total_time_human=$(seconds_to_human "$total_time")
+
+    output+="\nTotal time spent reading: $total_time_human\n\n"
+
+    # Most frequently read books
+    output+="--- Most Frequently Read Books ---\n"
+    local frequent_books
+    frequent_books=$(awk -F',' '{count[$1]++} END {for (book in count) printf "%-40s %d\n", book, count[book]}' "$BOOK_LOG_FILE" | sort -k2 -nr | head -n 10)
+    output+="$frequent_books\n\n"
+
+    # Books with ratings
+    output+="--- Books with Ratings ---\n"
+    local rated_books
+    rated_books=$(awk -F',' '$6 != "" {printf "%-40s %s\n", $1, $6}' "$BOOK_LOG_FILE")
+    output+="$rated_books\n"
+
+    # Display the output using rofi
+    printf "%s" "$output" | rofi -dmenu -p "Log Analysis"
+    local selected_analysis=$(printf "%s" "$output" | rofi -dmenu -p "Log Analysis")
+    if [[ -z "$selected_analysis" ]]; then
+        return 1 # User pressed Escape or closed rofi, go back
+    fi
+
+}
+
+# Handle command-line arguments
+RECURSIVE=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -r|--recursive) RECURSIVE=1; shift ;;
+    *) break ;;
+  esac
+done
+
+if [[ $# -eq 1 ]]; then BOOK_DIR="$1";
+elif [[ $# -gt 1 ]]; then
+    printf "Usage: %s [-r|--recursive] [book_directory]\n" "$0"
+    exit 1
 fi
 
 # Check if the directory exists
-if [ ! -d "$BOOK_DIR" ]; then
-  echo "Error: Directory $BOOK_DIR does not exist."
+if [[ ! -d "$BOOK_DIR" ]]; then
+  printf "Error: Directory '%s' does not exist.\n" "$BOOK_DIR"
   exit 1
 fi
 
-# List books in the directory
-BOOKS=$(find "$BOOK_DIR" -type f \( -iname "*.pdf" -o -iname "*.epub" \) | sort)
+# Find books (Corrected find command with eval)
+find "$BOOK_DIR" -type f \( -iname "*.pdf" -o -iname "*.epub" -o -iname "*.cbz" -o -iname "*.cbr" -o -iname "*.djvu" \) -print0 | sort -z > book_files.txt
 
 # Check if there are any books
-if [ -z "$BOOKS" ]; then
-  echo "No books found in $BOOK_DIR."
+if [[ ! -s book_files.txt ]]; then
+  printf "No books found in '%s'.\n" "$BOOK_DIR"
+  rm book_files.txt 2>/dev/null
   exit 1
 fi
 
-# Create a mapping of book names to full paths
-BOOK_NAMES=$(echo "$BOOKS" | awk -F'/' '{print $NF}')
-BOOK_MAP=$(paste -d '|' <(echo "$BOOK_NAMES") <(echo "$BOOKS"))
+# Use mapfile to read the null terminated file into an array
+mapfile -d $'\0' BOOKS < book_files.txt
+rm book_files.txt 2>/dev/null
 
-# Use rofi to select a book
-SELECTED_BOOK_NAME=$(echo "$BOOK_NAMES" | rofi -dmenu -i -p "Select a book:")
-
-# Check if a book was selected
-if [ -z "$SELECTED_BOOK_NAME" ]; then
-  echo "No book selected."
-  exit 0
+# Check if any books were found
+if [[ ${#BOOKS[@]} -eq 0 ]]; then
+    printf "No books found matching the specified criteria.\n"
+    exit 1
 fi
 
-# Map the selected name back to the full path
-SELECTED_BOOK=$(echo "$BOOK_MAP" | grep -F "$SELECTED_BOOK_NAME" | awk -F'|' '{print $2}')
+# Create an array of book names
+BOOK_NAMES=("${BOOKS[@]##*/}")
 
-# Open the selected book with the appropriate reader
-if [[ "$SELECTED_BOOK" == *.pdf ]]; then
-  if ! zathura "$SELECTED_BOOK"; then
-    echo "Error: Failed to open the book $SELECTED_BOOK with zathura."
-    exit 1
-  fi
-elif [[ "$SELECTED_BOOK" == *.epub ]]; then
-  if ! foliate "$SELECTED_BOOK"; then
-    echo "Error: Failed to open the book $SELECTED_BOOK with foliate."
-    exit 1
-  fi
-else
-  echo "Error: Unsupported file format."
-  exit 1
-fi
+# Rofi menu for selecting action
+OPTIONS=("Select a book" "Recent books" "Analyze log")
 
+while true; do
+    SELECTED_OPTION=$(printf "%s\n" "${OPTIONS[@]}" | rofi -dmenu -i -p "Select action:" -format i)
+
+    case "$SELECTED_OPTION" in
+        0) # Select a book
+            SELECTED_INDEX=$(printf "%s\n" "${BOOK_NAMES[@]}" | rofi -dmenu -i -p "Select a book:" -format i)
+            if [[ $? -ne 0 ]]; then
+                printf "Error: rofi failed to run. Is it installed?\n"
+                exit 1
+            fi
+            if [[ -z "$SELECTED_INDEX" ]]; then
+                printf "No book selected.\n"
+                exit 0
+            elif [[ "$SELECTED_INDEX" -ge ${#BOOKS[@]} ]]; then
+                printf "Invalid book selection.\n"
+                exit 1
+            fi
+            SELECTED_BOOK="${BOOKS[$SELECTED_INDEX]}"
+            # Time tracking and logging (using CSV)
+            start_time=$(date +%Y-%m-%d_%H:%M:%S) # Detailed start time
+
+            case "$SELECTED_BOOK" in
+              *.pdf) "$PDF_READER" "$SELECTED_BOOK" ;;
+              *.epub) "$EPUB_READER" "$SELECTED_BOOK" ;;
+              *.cbz|*.cbr) "$CB_READER" "$SELECTED_BOOK" ;;
+              *.djvu) "$DJVU_READER" "$SELECTED_BOOK" ;;
+              *) printf "Error: Unsupported file format: '%s'.\n" "$SELECTED_BOOK"; exit 1 ;;
+            esac
+            end_time=$(date +%Y-%m-%d_%H:%M:%S)   # Detailed end time
+
+            book_name=$(basename "$SELECTED_BOOK")
+
+            # Prompt if the book is finished and get rating
+            read -r -p "Did you finish reading '$book_name'? [y/N] " finished
+            finished="${finished:-n}"
+
+            rating=""
+            if [[ "$finished" == [yY] ]]; then
+                while true; do
+                    read -r -p "Rate the book (1-10): " rating
+                    if [[ "$rating" =~ ^[1-9]$|^10$ ]]; then # Validate rating
+                        break
+                    else
+                        printf "Invalid rating. Please enter a number between 1 and 10.\n"
+                    fi
+                done
+            fi
+
+            log_book "$book_name" "$start_time" "$end_time" "$finished" "$rating"
+
+            add_to_recent_books "$SELECTED_BOOK"
+            ;;
+        1) # Recent books
+            if [[ ! -s "$RECENT_BOOKS_FILE" ]]; then
+                printf "No recent books found.\n"
+                continue # Go back to the main menu
+            fi
+            RECENT_BOOKS=$(cat "$RECENT_BOOKS_FILE" 2>/dev/null | sort -u)
+            if [[ -z "$RECENT_BOOKS" ]]; then
+                printf "No recent books found.\n"
+                continue # Go back to the main menu
+            fi
+            printf "%s\0" "$RECENT_BOOKS" | rofi -dmenu -i -p "Recent books:" -format i -d | read -r -d '' SELECTED_BOOK_NAME
+            if [[ -z "$SELECTED_BOOK_NAME" ]]; then
+                continue # Go back to the main menu
+            fi
+            SELECTED_BOOK=$(grep -w -F "$SELECTED_BOOK_NAME" "$RECENT_BOOKS_FILE" | head -n 1)
+            # ... (rest of the recent book selection code)
+            break # Exit the loop after selecting a book
+            ;;
+        2) # Analyze log
+            if analyze_log; then # if analyze_log returns 1 (user cancelled)
+                continue
+            fi
+            ;;
+        *) # Handle CTRL+C or other unexpected input
+            break
+            ;;
+    esac
+done
