@@ -54,7 +54,7 @@ done
 shift $((OPTIND - 1))
 
 if [[ "$print_date" == true ]]; then
-  date "+%Y-%m-%d %H:%M:%S"
+  date "+%Y-%m-%d %H:%M:%S %B %A"
 fi
 
 # Year progress
