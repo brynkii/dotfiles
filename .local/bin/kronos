@@ -1,0 +1,138 @@
+#!/bin/bash
+
+# Color codes
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+WHITE='\033[1;37m'
+NC='\033[0m'
+
+# Progress bar characters (hardcoded)
+fill_char=""
+empty_char="."
+
+# Progress bar function (Corrected for floating-point percentages)
+progress_bar() {
+    local percent="$1"
+    local bar_color="$2"
+    local text_color="$3"
+
+    IFS='[;' read -p $'\e[6n' -d R -rs _ _ COLUMN _
+    local cols=$(tput cols)
+    local bar_length=$((cols - COLUMN - 2))
+
+    # Perform floating point multiplication and division with bc
+    local filled_length_float=$(echo "scale=2; $percent * $bar_length / 100" | bc)
+
+    # Convert the floating-point result to an integer
+    local filled_length="${filled_length_float%.*}"
+
+    printf "["
+
+    for ((i = 0; i < filled_length; i++)); do
+        printf "${bar_color}${fill_char}${NC}"
+    done
+
+    for ((i = filled_length; i < bar_length; i++)); do
+        printf "${empty_char}"
+    done
+
+    printf "]"
+}
+
+# Main program
+print_date=true
+
+while getopts ":n" opt; do
+    case "$opt" in
+        n) print_date=false ;;
+        \?) printf "Invalid option: -%s\n" "$OPTARG" >&2; exit 1 ;;
+    esac
+done
+
+shift $((OPTIND - 1))
+
+if [[ "$print_date" == true ]]; then
+  date "+%Y-%m-%d %H:%M:%S"
+fi
+
+# Year progress
+current_year=$(date +%Y)
+
+if (( (current_year % 4 == 0) && (current_year % 100 != 0) )) || (( current_year % 400 == 0 )); then
+    days_in_year=366
+else
+    days_in_year=365
+fi
+
+day_of_the_year=$(date +%j)
+year_percent=$(echo "scale=2; 100 * $day_of_the_year / $days_in_year" | bc)
+
+year_text_color="$GREEN"
+if (( $(echo "$year_percent > 80" | bc -l) )); then
+    year_text_color="$RED"
+elif (( $(echo "$year_percent < 50" | bc -l) )); then
+    year_text_color="$GREEN"
+else
+    year_text_color="$WHITE"
+fi
+
+printf "${year_text_color}Year\t%s%% ${NC}" "$year_percent"
+progress_bar "$year_percent" "$GREEN" "$year_text_color"
+printf "\n"
+
+# Month progress
+day_of_the_month=$(date +%d)
+days_in_month=$(date +%d -d "$(date +%Y-%m-01) +1 month -1 day")
+month_percent=$(echo "scale=2; 100 * $day_of_the_month / $days_in_month" | bc)
+month_text_color="$BLUE"
+if (( $(echo "$month_percent > 80" | bc -l) )); then
+    month_text_color="$RED"
+elif (( $(echo "$month_percent < 50" | bc -l) )); then
+    month_text_color="$GREEN"
+else
+    month_text_color="$WHITE"
+fi
+
+printf "${month_text_color}Month\t%s%% ${NC}" "$month_percent"
+progress_bar "$month_percent" "$BLUE" "$month_text_color"
+printf "\n"
+
+# Week progress (Corrected: Progress through the current week)
+day_of_the_week=$(date +%u) # Day of the week (1-7, Monday-Sunday)
+week_percent=$(echo "scale=2; 100 * $day_of_the_week / 7" | bc)
+
+week_text_color="$YELLOW"
+if (( $(echo "$week_percent > 80" | bc -l) )); then
+    week_text_color="$RED"
+elif (( $(echo "$week_percent < 50" | bc -l) )); then
+    week_text_color="$GREEN"
+else
+    week_text_color="$WHITE"
+fi
+
+printf "${week_text_color}Week\t%s%% ${NC}" "$week_percent"
+progress_bar "$week_percent" "$YELLOW" "$week_text_color"
+printf "\n"
+
+# Day progress
+current_hour=$(date +%H)
+current_minute=$(date +%M)
+minutes=$((24*60))
+minute_of_day=$((10#$current_hour * 60 + 10#$current_minute))
+day_percent=$(echo "scale=2; 100 * $minute_of_day / $minutes" | bc)
+day_text_color="$RED"
+if (( $(echo "$day_percent > 80" | bc -l) )); then
+    day_text_color="$RED"
+elif (( $(echo "$day_percent < 50" | bc -l) )); then
+    day_text_color="$GREEN"
+else
+    day_text_color="$WHITE"
+fi
+
+printf "${day_text_color}Day\t%s%% ${NC}" "$day_percent"
+progress_bar "$day_percent" "$RED" "$day_text_color"
+printf "\n"
+
+exit 0
