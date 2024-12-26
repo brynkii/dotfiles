@@ -624,3 +624,5 @@ source ~/.local/share/blesh/ble.sh
 
 # Configuring direnv
 eval "$(direnv hook bash)"
+
+source /home/brian/.config/broot/launcher/bash/br

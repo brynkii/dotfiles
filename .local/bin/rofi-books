@@ -59,19 +59,6 @@ log_book() {
     mv "temp.csv" "$BOOK_LOG_FILE"
 }
 
-# ... (Rest of the script)
-
-# Time tracking and logging (using CSV)
-#start_time=$(date +%Y-%m-%d_%H:%M:%S) # Detailed start time
-# ... (Open the book)
-#end_time=$(date +%Y-%m-%d_%H:%M:%S)   # Detailed end time
-
-# ... (Prompt for finished and rating)
-
-#log_book "$book_name" "$start_time" "$end_time" "$finished" "$rating"
-#!/usr/bin/env bash
-
-# ... (Other parts of the script: variables, functions, argument parsing, finding books, rofi selection, add_to_recent_books, log_book)
 seconds_to_human() {
     local seconds="$1"
     local days=$((seconds / 86400))

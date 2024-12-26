@@ -72,3 +72,5 @@ alias '???'=google
 # zoxide
 eval "$(zoxide init zsh)"
 
+
+source /home/brian/.config/broot/launcher/bash/br
