@@ -601,7 +601,7 @@ export FZF_DEFAULT_OPTS="-e -i --info=default --cycle --scroll-off=5 --preview-w
 
 # Welcome message
 fastfetch
-echo -ne "Hello $USER It's "; date '+%A, %B %-d %Y'
+echo -ne "Hello $USER It's "; kronos
 echo -e "And now your moment of Zen:"; fortune
 
 # Check if the shell is interactive
