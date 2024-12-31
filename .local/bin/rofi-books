@@ -193,7 +193,7 @@ while true; do
             book_name=$(basename "$SELECTED_BOOK")
 
             # Prompt if the book is finished and get rating
-            read -r -p "Did you finish reading '$book_name'? [y/N] " finished
+            read -r -p "Did you finish reading '$book_name'? [y/N] " finished | rofi -dmenu -i -p "is the book finished?"
             finished="${finished:-n}"
 
             rating=""
