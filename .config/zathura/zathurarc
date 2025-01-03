@@ -49,5 +49,7 @@ set recolor-lightcolor          "#11121D" # Background
 set recolor-darkcolor           "#A0A8CD" # Foreground
 
 # Startup options
-set adjust-open width
+set adjust-open "fit-page"
 set recolor false
+set pages-per-row 1
+set scroll-page-aware "true"
