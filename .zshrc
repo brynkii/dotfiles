@@ -9,9 +9,6 @@ plug "zsh-users/zsh-syntax-highlighting"
 autoload -Uz compinit
 compinit
 
-export PYENV_ROOT="$HOME/.pyenv" >> ~/.zshrc
-command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH" >> ~/.zshrc
-eval "$(pyenv init -)" >> ~/.zshrc
 
 ## some simple aliases for ease of life
 # # ex - archive extractor
@@ -56,8 +53,6 @@ export PATH="$HOME/.local/share/cargo/bin:$PATH"
 ## starship config hope this works
 eval "$(starship init zsh)"
 
-## ssh config
-eval $(keychain --eval id_ed25519)
 
 # Adds ~/.local/bin and subfolders to $PATH
 export PATH=$PATH:~/.local/bin

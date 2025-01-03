@@ -8,6 +8,9 @@ keymap.set('i', 'jk', '<ESC>') -- exit insert mode with jk
 keymap.set('n', 'gu', ':!open <c-r><c-a><CR>') -- open URL under cursor
 keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>') -- Clear highlights on search when pressing <ESC> in normal mode.
 keymap.set('t', '<Esc><Esc>', '<C-\\><C-n>', { desc = 'Exit terminal mode' })
+keymap.set('n', '<space><space>x', '<cmd>source %<CR>')
+keymap.set('n', '<space>x', ':.lua<CR>')
+keymap.set('v', '<space>x', ':lua<CR>')
 
 -- Split window management
 keymap.set('n', '<leader>sv', '<C-w>v') -- split window vertically
