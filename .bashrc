@@ -44,7 +44,7 @@ export VIDEOS="$HOME/Videos"
 export WORKSPACES="$HOME/Workspaces" # container home dirs for mounting
 export TERM=xterm-256color
 export HRULEWIDTH=73
-export EDITOR=vi
+export EDITOR=nvim
 export VISUAL=vi
 export EDITOR_PREFIX=vi
 export GOPRIVATE="github.com/$GITUSER/*,gitlab.com/$GITUSER/*"
@@ -292,7 +292,12 @@ fi
 alias logs="sudo find /var/log -type f -exec file {} \; | grep 'text' | cut -d' ' -f1 | sed -e's/:$//g' | grep -v '[0-9]$' | xargs tail -f"
 
 # Alias's to show disk space and space used in a folder
-alias folders='du -h --max-depth=1 2> /dev/null'
+alias folders='du -h --max-depth=1 2> /dev/null | awk \
+  "/[0-9]+G/ {printf \"\033[31m%s\033[0m\n\", \$0} \
+   /[0-9]+M/ {printf \"\033[32m%s\033[0m\n\", \$0} \
+   /[0-9]+K/ {printf \"\033[97m%s\033[0m\n\", \$0} \
+   !/[0-9]+[GMK]/ {print \$0}"'
+
 alias folderssort='find . -maxdepth 1 -type d -print0 | xargs -0 du -sk | sort -rn'
 alias tree='tree -CAhF --dirsfirst'
 alias treed='tree -CAFd'
