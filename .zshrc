@@ -69,3 +69,5 @@ eval "$(zoxide init zsh)"
 
 
 source /home/brian/.config/broot/launcher/bash/br
+
+[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
