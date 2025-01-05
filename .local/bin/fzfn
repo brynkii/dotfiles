@@ -1,0 +1,13 @@
+#!/bin/bash
+
+# Launch fzf to select a file and open it in Neovim
+SELECTED_FILE=$(fzf  --prompt="Select a file to open in Neovim: " --height=20 --reverse)
+
+# Check if a file was selected
+if [[ -n "$SELECTED_FILE" ]]; then
+    # Open the selected file in Neovim
+    nvim "$SELECTED_FILE"
+else
+    echo "No file selected."
+fi
+

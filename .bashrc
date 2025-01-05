@@ -30,8 +30,8 @@ export HEIGHT=174
 export REPOS="$HOME/repos"
 export GHREPOS="$REPOS/github/$GITUSER"
 export DOTFILES="$HOME/dotfiles"
-export SCRIPTS="$DOTFILES/local/bin"
-export SNIPPETS="$DOTFILES/local/snippets"
+export SCRIPTS="$DOTFILES/.local/bin"
+export SNIPPETS="$DOTFILES/.local/snippets"
 export HELP_BROWSER=lynx
 export DESKTOP="$HOME/Desktop"
 export DOCUMENTS="$HOME/Documents"
@@ -596,3 +596,5 @@ source /home/brian/.config/broot/launcher/bash/br
 [[ ! ${BLE_VERSION-} ]] || ble-attach
 
 [ -f ~/.fzf.bash ] && source ~/.fzf.bash
+export PATH="/home/brian/.config/herd-lite/bin:$PATH"
+export PHP_INI_SCAN_DIR="/home/brian/.config/herd-lite/bin:$PHP_INI_SCAN_DIR"
