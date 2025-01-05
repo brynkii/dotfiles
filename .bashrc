@@ -593,8 +593,8 @@ export NVM_DIR="$HOME/.nvm"
 eval "$(direnv hook bash)"
 
 source /home/brian/.config/broot/launcher/bash/br
-[[ ! ${BLE_VERSION-} ]] || ble-attach
 
 [ -f ~/.fzf.bash ] && source ~/.fzf.bash
 export PATH="/home/brian/.config/herd-lite/bin:$PATH"
 export PHP_INI_SCAN_DIR="/home/brian/.config/herd-lite/bin:$PHP_INI_SCAN_DIR"
+[[ ! ${BLE_VERSION-} ]] || ble-attach
