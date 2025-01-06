@@ -1,0 +1,53 @@
+#!/bin/bash
+
+# Temporary file to store the selected directory
+TEMP_FILE="/tmp/fzf_selected_dir"
+HIST_FILE="$HOME/.local/share/fcd/fcd.history"
+
+# Ensure history file exists
+touch "$HIST_FILE"
+
+# Function to search directory history
+search_history() {
+    cat "$HIST_FILE" | sort -u | fzf --prompt="History: Select a directory: " --height=20 --reverse
+}
+
+
+# Prompt the user to choose between history or file search
+echo "Choose a mode:"
+echo "1) History Search"
+echo "2) Directory Search"
+read -p "Enter choice (1 or 2): " MODE
+
+# Handle user selection
+case $MODE in
+    1)
+        SELECTED_DIR=$(search_history)
+        ;;
+    2)
+        # Search directories with limited depth and exclude .git folders
+        SELECTED_DIR=$(find ~ -type d | fzf --prompt="Select a directory to navigate to: " --height=20 --reverse)
+        ;;
+    *)
+        echo "Invalid choice."
+        exit 1
+        ;;
+esac
+
+# If a valid directory is selected, write to the temp file and append to history
+if [[ -n "$SELECTED_DIR" ]]; then
+    # Resolve the selected directory to an absolute path
+    ABS_DIR=$(realpath "$SELECTED_DIR" 2>/dev/null)
+
+    # Check if it is a valid, readable directory
+    if [[ -d "$ABS_DIR" && -r "$ABS_DIR" ]]; then
+        echo "$ABS_DIR" > "$TEMP_FILE"
+        echo "$ABS_DIR" >> "$HIST_FILE"
+    else
+        echo "Invalid or inaccessible directory: $SELECTED_DIR"
+        > "$TEMP_FILE"
+    fi
+else
+    echo "No directory selected."
+    > "$TEMP_FILE"
+fi
