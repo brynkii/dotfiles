@@ -499,6 +499,15 @@ hwinfo() {
 
 
 # ------------- source external dependencies / completion ------------
+fzcd() {
+    # Run the script
+    bash ~/.local/bin/fcd
+
+    # Read the selected directory from the temporary file
+    if [[ -f /tmp/fzf_selected_dir ]] && [[ -s /tmp/fzf_selected_dir ]]; then
+        cd "$(cat /tmp/fzf_selected_dir)" || echo "Failed to navigate to directory."
+    fi
+}
 
 # for mac
 # [[ -r "/usr/local/etc/profile.d/bash_completion.sh" ]] && . "/usr/local/etc/profile.d/bash_completion.sh"
