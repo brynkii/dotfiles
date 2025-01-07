@@ -3,6 +3,9 @@ vim.g.mapleader = ' '
 
 local keymap = vim.keymap
 
+-- For conciseness
+local opts = { noremap = true, silent = true }
+
 -- General keymaps
 keymap.set('i', 'jk', '<ESC>') -- exit insert mode with jk
 keymap.set('n', 'gu', ':!open <c-r><c-a><CR>') -- open URL under cursor
@@ -11,6 +14,41 @@ keymap.set('t', '<Esc><Esc>', '<C-\\><C-n>', { desc = 'Exit terminal mode' })
 keymap.set('n', '<space><space>x', '<cmd>source %<CR>')
 keymap.set('n', '<space>x', ':.lua<CR>')
 keymap.set('v', '<space>x', ':lua<CR>')
+
+-- Allow moving the cursor through wrapped lines with j, k
+vim.keymap.set('n', 'k', "v:count == 0 ? 'gk' : 'k'", { expr = true, silent = true })
+vim.keymap.set('n', 'j', "v:count == 0 ? 'gj' : 'j'", { expr = true, silent = true })
+-- Vertical scroll and center
+vim.keymap.set('n', '<C-d>', '<C-d>zz', opts)
+vim.keymap.set('n', '<C-u>', '<C-u>zz', opts)
+
+-- Find and center
+vim.keymap.set('n', 'n', 'nzzzv')
+vim.keymap.set('n', 'N', 'Nzzzv')
+
+-- Resize with arrows
+vim.keymap.set('n', '<Up>', ':resize -2<CR>', opts)
+vim.keymap.set('n', '<Down>', ':resize +2<CR>', opts)
+vim.keymap.set('n', '<Left>', ':vertical resize -2<CR>', opts)
+vim.keymap.set('n', '<Right>', ':vertical resize +2<CR>', opts)
+
+-- Increment/decrement numbers
+vim.keymap.set('n', '<leader>+', '<C-a>', opts) -- increment
+vim.keymap.set('n', '<leader>-', '<C-x>', opts) -- decrement
+
+-- Toggle line wrapping
+vim.keymap.set('n', '<leader>lw', '<cmd>set wrap!<CR>', opts)
+
+-- Stay in indent mode
+vim.keymap.set('v', '<', '<gv', opts)
+vim.keymap.set('v', '>', '>gv', opts)
+
+-- Move text up and down
+vim.keymap.set('v', '<A-j>', ':m .+1<CR>==', opts)
+vim.keymap.set('v', '<A-k>', ':m .-2<CR>==', opts)
+
+-- Keep last yanked when pasting
+vim.keymap.set('v', 'p', '"_dP', opts)
 
 -- Split window management
 keymap.set('n', '<leader>sv', '<C-w>v') -- split window vertically
@@ -33,41 +71,6 @@ keymap.set('n', '<leader>ee', ':NvimTreeToggle<CR>') -- toggle file explorer
 keymap.set('n', '<leader>er', ':NvimTreeFocus<CR>') -- toggle focus to file explorer
 keymap.set('n', '<leader>ef', ':NvimTreeFindFile<CR>') -- find file in file explorer
 
---- harpoon
-local harpoon = require 'harpoon'
-
--- REQUIRED
-harpoon:setup()
--- REQUIRED
-
-keymap.set('n', '<leader>ha', function()
-  harpoon:list():append()
-end)
-keymap.set('n', '<leader>ho', function()
-  harpoon.ui:toggle_quick_menu(harpoon:list())
-end)
-keymap.set('n', '<leader>h1', function()
-  harpoon:list():select(1)
-end)
-keymap.set('n', '<leader>h2', function()
-  harpoon:list():select(2)
-end)
-keymap.set('n', '<leader>h3', function()
-  harpoon:list():select(3)
-end)
-keymap.set('n', '<leader>h4', function()
-  harpoon:list():select(4)
-end)
-keymap.set('n', '<leader>h4', function()
-  harpoon:list():select(5)
-end)
-keymap.set('n', '<leader>hp', function()
-  harpoon:list():prev()
-end)
-keymap.set('n', '<leader>hn', function()
-  harpoon:list():next()
-end)
-
 -- todo comments
 keymap.set('n', ']t', function()
   require('todo-comments').jump_next()
@@ -79,16 +82,15 @@ end, { desc = 'Previous todo comment' })
 -- Diagnostic keymaps
 keymap.set('n', '[d', vim.diagnostic.goto_prev, { desc = 'Go to previous [D]iagnostic message' })
 keymap.set('n', ']d', vim.diagnostic.goto_next, { desc = 'Go to next [D]iagnostic message' })
-keymap.set('n', '<leader>ea', vim.diagnostic.open_float, { desc = 'Show diagnostic [E]rror messages' })
+keymap.set('n', '<leader>d', vim.diagnostic.open_float, { desc = 'Open floating [D]iagnostic messages' })
 keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
 
 --undotree
 vim.keymap.set('n', '<leader>u', vim.cmd.UndotreeToggle, { desc = 'UndotreeToggle' })
 
---Git
 -- Git
 vim.api.nvim_set_keymap('n', '<leader>gc', ':Git commit<CR>', { noremap = false })
 vim.api.nvim_set_keymap('n', '<leader>ga', ':Git add', { noremap = false })
 vim.api.nvim_set_keymap('n', '<leader>gp', ':Git push -u origin HEAD<CR>', { noremap = false })
-vim.api.nvim_set_keymap('n', '<leader>gs', ':Git status<CR>', { noremap = false })
+vim.api.nvim_set_keymap('n', '<leader>gst', ':Git status<CR>', { noremap = false })
 vim.api.nvim_set_keymap('n', '<leader>gl', ':Git log --decorate --graph --oneline<CR>', { noremap = false })
