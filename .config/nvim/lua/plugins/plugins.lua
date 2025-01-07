@@ -2,7 +2,14 @@ return {
   -- Detect tabstop and shiftwidth automatically
   'tpope/vim-sleuth',
   'tpope/vim-surround',
-  'brenoprata10/nvim-highlight-colors',
+  'tpope/vim-rhubarb',
+  {
+    -- high-performance color highlighter
+    'norcalli/nvim-colorizer.lua',
+    config = function()
+      require('colorizer').setup()
+    end,
+  },
   -- Useful plugin to show you pending keybinds.
   -- "gc" to comment visual regions/lines
   { 'numToStr/Comment.nvim', opts = {} },
