@@ -1,0 +1,189 @@
+#!/bin/bash
+
+LOG_DIR="/var/log/apt"
+LOG_FILES=("$LOG_DIR/history.log" "$LOG_DIR/history.log.1" "$LOG_DIR/history.log.*.gz")
+TEMP_FILE=$(mktemp)
+
+# Color codes for highlighting
+COLOR_RESET="\033[0m"
+COLOR_GREEN="\033[32m"
+COLOR_RED="\033[31m"
+COLOR_BLUE="\033[34m"
+
+# Function to parse logs
+parse_logs() {
+    local log_file="$1"
+    if [[ "$log_file" == *.gz ]]; then
+        zcat "$log_file" | grep -E "^(Start-Date:|Commandline:|Upgrade:|Remove:)" >> "$TEMP_FILE"
+    else
+        grep -E "^(Start-Date:|Commandline:|Upgrade:|Remove:)" "$log_file" >> "$TEMP_FILE"
+    fi
+}
+
+# Function to filter logs by date range
+filter_by_date() {
+    local start_date="$1"
+    local end_date="$2"
+    awk -v start="$start_date" -v end="$end_date" '
+    /^Start-Date:/ {
+        gsub("Start-Date: ", "", $0)
+        log_date = $0
+        if (log_date >= start && log_date <= end) print $0
+    }' "$TEMP_FILE" > "${TEMP_FILE}.filtered"
+    mv "${TEMP_FILE}.filtered" "$TEMP_FILE"
+}
+
+# Function to filter logs by package name
+filter_by_package() {
+    local package="$1"
+    grep -i "$package" "$TEMP_FILE" > "${TEMP_FILE}.filtered"
+    mv "${TEMP_FILE}.filtered" "$TEMP_FILE"
+}
+
+# Function to display dependencies
+show_dependencies() {
+    local package="$1"
+    echo -e "${COLOR_BLUE}Dependencies for package '$package':${COLOR_RESET}"
+    apt-cache depends "$package" | grep "Depends" | sed 's/.*Depends:\s*//'
+}
+
+# Function to generate automatic cleanup suggestions
+cleanup_suggestions() {
+    echo -e "${COLOR_BLUE}Automatic Cleanup Suggestions:${COLOR_RESET}"
+    apt autoremove --simulate
+}
+
+# Function to generate a report
+generate_report() {
+    echo -e "${COLOR_BLUE}APT Report:${COLOR_RESET}"
+    awk -v green="$COLOR_GREEN" -v red="$COLOR_RED" -v reset="$COLOR_RESET" '
+    BEGIN {
+        date = ""; install_list = ""; upgrade_list = ""; remove_list = ""; total_installed = 0; total_upgraded = 0; total_removed = 0
+    }
+    /^Start-Date:/ {
+        if (date != "") {
+            print date
+            if (install_list != "") print "  Installed: " install_list
+            if (upgrade_list != "") print "  Upgraded: " green upgrade_list reset
+            if (remove_list != "") print "  Removed: " red remove_list reset
+            print ""
+        }
+        date = $0
+        install_list = ""; upgrade_list = ""; remove_list = ""
+    }
+    /Commandline:.*install/ {
+        sub(/Commandline: /, "", $0)
+        install_list = install_list " " $0
+        total_installed++
+    }
+    /Upgrade:/ {
+        sub(/Upgrade: /, "", $0)
+        upgrade_list = upgrade_list " " $0
+        total_upgraded++
+    }
+    /Remove:/ {
+        sub(/Remove: /, "", $0)
+        remove_list = remove_list " " $0
+        total_removed++
+    }
+    END {
+        if (date != "") {
+            print date
+            if (install_list != "") print "  Installed: " install_list
+            if (upgrade_list != "") print "  Upgraded: " green upgrade_list reset
+            if (remove_list != "") print "  Removed: " red remove_list reset
+        }
+        print "\nSummary:"
+        print "  Total Installed: " total_installed
+        print "  Total Upgraded: " total_upgraded
+        print "  Total Removed: " total_removed
+    }' "$TEMP_FILE"
+}
+
+# Function for snapshot management using apt-mark
+manage_snapshot() {
+    local action="$1"
+    local snapshot_file="$2"
+    if [[ "$action" == "save" ]]; then
+        apt-mark showmanual > "$snapshot_file"
+        echo "Snapshot saved to $snapshot_file"
+    elif [[ "$action" == "compare" ]]; then
+        if [[ ! -f "$snapshot_file" ]]; then
+            echo "Snapshot file not found: $snapshot_file"
+            return
+        fi
+        echo "Comparing current state with snapshot..."
+        comm -3 <(apt-mark showmanual | sort) <(sort "$snapshot_file")
+    fi
+}
+
+# Function to display help
+show_help() {
+    echo "Usage: apt-log-analyzer [OPTIONS]"
+    echo
+    echo "Options:"
+    echo "  --start-date [DATE]       Filter logs starting from this date (format: YYYY-MM-DD)."
+    echo "  --end-date [DATE]         Filter logs up to this date (format: YYYY-MM-DD)."
+    echo "  --package [PACKAGE_NAME]  Filter logs for a specific package."
+    echo "  --report                  Generate a detailed report of installed, upgraded, and removed packages."
+    echo "  --cleanup                 Show automatic cleanup suggestions."
+    echo "  --snapshot-save [FILE]    Save the current list of manually installed packages to a snapshot file."
+    echo "  --snapshot-compare [FILE] Compare the current list of manually installed packages with a snapshot file."
+    echo "  --help                    Display this help message."
+    echo
+    echo "Examples:"
+    echo "  ./apt-logger --start-date 2025-01-01 --end-date 2025-01-31"
+    echo "  ./apt-logger --package nginx --report"
+    echo "  ./apt-logger --snapshot-save snapshot.txt"
+    echo "  ./apt-logger --snapshot-compare snapshot.txt"
+}
+
+# Main function
+main() {
+    local start_date="" end_date="" package="" report=false cleanup=false snapshot_action="" snapshot_file=""
+    
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --start-date) start_date="$2"; shift ;;
+            --end-date) end_date="$2"; shift ;;
+            --package) package="$2"; shift ;;
+            --report) report=true ;;
+            --cleanup) cleanup=true ;;
+            --snapshot-save) snapshot_action="save"; snapshot_file="$2"; shift ;;
+            --snapshot-compare) snapshot_action="compare"; snapshot_file="$2"; shift ;;
+            --help) show_help; exit 0 ;;
+            *) echo "Unknown option: $1"; show_help;  exit 1 ;;
+        esac
+        shift
+    done
+
+    echo "Parsing apt logs..."
+    > "$TEMP_FILE"
+
+    for log in "${LOG_FILES[@]}"; do
+        for file in $(ls $log 2>/dev/null); do
+            parse_logs "$file"
+        done
+    done
+
+    [[ -n "$start_date" && -n "$end_date" ]] && filter_by_date "$start_date" "$end_date"
+    [[ -n "$package" ]] && filter_by_package "$package"
+    
+    if [[ "$report" == true ]]; then
+        generate_report
+    fi
+
+    if [[ "$cleanup" == true ]]; then
+        cleanup_suggestions
+    fi
+
+    if [[ -n "$snapshot_action" ]]; then
+        manage_snapshot "$snapshot_action" "$snapshot_file"
+    fi
+
+    rm -f "$TEMP_FILE"
+}
+
+# Run the main function
+main "$@"
+

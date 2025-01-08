@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# Highlight processes with CPU usage > 10% and sort by CPU usage
+ps -eo pid,user,%cpu,%mem,command --sort=-%cpu | awk 'NR==1 || $4 > 02.0' | \
+fzf --height 40% --layout=reverse --header-lines=1 --prompt="Select process to kill: " | \
+awk '{print $1}' | xargs -r bash -c "
+if ! kill $1 2> /dev/null; then 
+  echo "Failed to kill process "$1". Attempting with sudo..."
+  sudo kill $1 || echo "Failed to kill process "$1" even with sudo."
+fi" --
+

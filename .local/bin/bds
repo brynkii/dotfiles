@@ -11,51 +11,35 @@ log_file="$log_dir/deletion_log.txt"
 
 # Function to delete 0KB files
 delete_zero_kb_files() {
-    dry_run="$1"
-    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Starting deletion of 0KB files in $HOME (dry-run: $dry_run)..." | tee -a "$log_file"
-    if [[ "$dry_run" == "yes" ]]; then
-        find "$HOME" -type f -size 0 -print | tee -a "$log_file"
-    else
-        find "$HOME" -type f -size 0 -print -delete | tee -a "$log_file"
-    fi
+    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Starting deletion of 0KB files in $HOME..." | tee -a "$log_file"
+    find . -type f -size 0 -print -delete | tee -a "$log_file"
     echo "$(date '+[%Y-%m-%d %H:%M:%S]') Deletion of 0KB files completed." | tee -a "$log_file"
 }
 
 # Function to delete specific files by name
 delete_specific_files() {
-    read -p "Enter the names of files to delete (comma-separated): " file_names
+    read -rp "Enter the names of files to delete (comma-separated): " file_names
     IFS=',' read -r -a files_to_delete <<< "$file_names"
 
-    dry_run="$1"
-    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Starting deletion of specific files: ${files_to_delete[*]} in $HOME (dry-run: $dry_run)" | tee -a "$log_file"
+    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Starting deletion of specific files: ${files_to_delete[*]} in $HOME" | tee -a "$log_file"
     for file_name in "${files_to_delete[@]}"; do
-        if [[ "$dry_run" == "yes" ]]; then
-            find "$HOME" -type f -name "$file_name" -print | tee -a "$log_file"
-        else
-            find "$HOME" -type f -name "$file_name" -print -delete | tee -a "$log_file"
-        fi
+        find "$HOME" -type f -name "$file_name" -print -delete | tee -a "$log_file"
     done
     echo "$(date '+[%Y-%m-%d %H:%M:%S]') Deletion of specific files completed." | tee -a "$log_file"
 }
 
 # Main menu
 echo "Choose the deletion task:"
-echo "1. Delete files with 0KB size in $HOME"
+echo "1. Delete files with 0KB size in $PWD"
 echo "2. Delete specific files by name in $HOME"
-read -p "Enter your choice (1/2): " choice
-
-read -p "Do you want to perform a dry-run? (y/n): " dry_run_option
-dry_run="no"
-if [[ "$dry_run_option" == "y" ]]; then
-    dry_run="yes"
-fi
+read -rp "Enter your choice (1/2): " choice
 
 case "$choice" in
 1)
-    delete_zero_kb_files "$dry_run"
+    delete_zero_kb_files
     ;;
 2)
-    delete_specific_files "$dry_run"
+    delete_specific_files
     ;;
 *)
     echo "Invalid choice. Exiting."
