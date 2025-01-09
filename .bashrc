@@ -501,7 +501,7 @@ hwinfo() {
 # ------------- source external dependencies / completion ------------
 fcd() {
     # Run the script
-    bash ~/.local/bin/fcd
+    bash ~/.local/bin/fzcd
 
     # Read the selected directory from the temporary file
     if [[ -f /tmp/fzf_selected_dir ]] && [[ -s /tmp/fzf_selected_dir ]]; then
