@@ -89,7 +89,7 @@ keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnosti
 vim.keymap.set('n', '<leader>u', vim.cmd.UndotreeToggle, { desc = 'UndotreeToggle' })
 
 -- Git
-vim.api.nvim_set_keymap('n', '<leader>gc', ':Git commit<CR>', { noremap = false })
+vim.api.nvim_set_keymap('n', '<leader>gcc', ':Git commit<CR>', { noremap = false })
 vim.api.nvim_set_keymap('n', '<leader>ga', ':Git add', { noremap = false })
 vim.api.nvim_set_keymap('n', '<leader>gp', ':Git push -u origin HEAD<CR>', { noremap = false })
 vim.api.nvim_set_keymap('n', '<leader>gst', ':Git status<CR>', { noremap = false })
