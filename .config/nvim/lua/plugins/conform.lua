@@ -33,7 +33,7 @@ return { -- Autoformat
     formatters_by_ft = {
       lua = { 'stylua' },
       -- Conform can also run multiple formatters sequentially
-      python = { 'isort', 'black' },
+      python = { 'ruff' },
       --
       svelte = { { 'prettierd', 'prettier', stop_after_first = true } },
       astro = { { 'prettierd', 'prettier', stop_after_first = true } },
@@ -48,7 +48,7 @@ return { -- Autoformat
       markdown = { { 'prettierd', 'prettier', stop_after_first = true } },
       erb = { 'htmlbeautifier' },
       html = { 'htmlbeautifier' },
-      bash = { 'beautysh' },
+      bash = { 'shellcheck', 'shfmt', 'beautysh' },
       proto = { 'buf' },
       rust = { 'rustfmt' },
       yaml = { 'yamlfix' },

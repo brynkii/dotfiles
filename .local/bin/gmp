@@ -12,7 +12,7 @@ error_log="$log_dir/git_update_errors.log"
 summary_file="$log_dir/git_update_summary.txt"
 
 # List of directories to exclude
-exclude_dirs=("$HOME/.local/share/Trash/*" "$HOME/Documents/akasha/*")
+exclude_dirs=("$HOME/.local/share/Trash/*" "$HOME/Documents/akasha/*" "$HOME/.local/share/nvim/*")
 
 # Convert the exclude list to find's `-path` format
 exclude_args=()
@@ -32,7 +32,7 @@ check_internet() {
 
 # Find all directories containing a .git folder, excluding specified ones
 find_git_dirs() {
-    find ~ \( "${exclude_args[@]}" -false \) -prune -o -type d -name ".git" -exec dirname {} \;
+    find ~ "${exclude_args[@]}" -type d -name ".git" -prune -exec dirname {} \;
 }
 
 # Perform git pull in a given directory with auto-retry
