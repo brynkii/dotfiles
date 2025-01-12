@@ -187,7 +187,6 @@ return {
         bashls = {},
         graphql = {},
         cssls = {},
-        ltex = {},
         texlab = {},
         docker_compose_language_service = {},
         -- ... etc. See `:help lspconfig-all` for a list of all the pre-configured LSPs
