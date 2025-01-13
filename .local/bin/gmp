@@ -1,4 +1,5 @@
 #!/bin/bash
+
 # Start timer
 start_time=$(date +%s)
 
@@ -10,6 +11,8 @@ mkdir -p "$log_dir" # Ensure the log directory exists
 log_file="$log_dir/git_update_log.txt"
 error_log="$log_dir/git_update_errors.log"
 summary_file="$log_dir/git_update_summary.txt"
+success_file="$log_dir/successful_updates.txt"
+failure_file="$log_dir/failed_updates.txt"
 
 # List of directories to exclude
 exclude_dirs=("$HOME/.local/share/Trash/*" "$HOME/Documents/akasha/*" "$HOME/.local/share/nvim/*")
@@ -42,81 +45,84 @@ update_repo() {
 
     for attempt in {1..3}; do
         {
-            cd "$dir" && git pull | tee -a "$log_file" && break
+            cd "$dir" && git pull | tee -a "$log_file" && echo "$dir" >> "$success_file" && return
         } || {
             echo "$(date '+[%Y-%m-%d %H:%M:%S]') Attempt $attempt failed for: $dir" | tee -a "$error_log"
-            if [[ $attempt -eq 3 ]]; then
-                echo "$dir" >> "$failure_file"
-            fi
         }
     done
 
-    if [[ $attempt -eq 0 ]]; then
-        echo "$dir" >> "$success_file"
+    echo "$dir" >> "$failure_file"
+}
+
+# Generate summary
+summarize_results() {
+    local success_count failure_count
+    success_count=$(wc -l < "$success_file" | tr -d ' ')
+    failure_count=$(wc -l < "$failure_file" | tr -d ' ')
+
+    : > "$summary_file"
+    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Summary of Git Updates:" | tee -a "$summary_file"
+    echo "------------------------" | tee -a "$summary_file"
+    echo "Successful updates: $success_count" | tee -a "$summary_file"
+    echo "Failed updates:     $failure_count" | tee -a "$summary_file"
+
+    if [[ $success_count -gt 0 ]]; then
+        echo "Successfully updated repositories:" | tee -a "$summary_file"
+        cat "$success_file" | tee -a "$summary_file"
+    fi
+
+    if [[ $failure_count -gt 0 ]]; then
+        echo "Repositories that failed to update:" | tee -a "$summary_file"
+        cat "$failure_file" | tee -a "$summary_file"
     fi
 }
 
 # Main script
-check_internet
+main() {
+    check_internet
 
-echo "$(date '+[%Y-%m-%d %H:%M:%S]') Searching for Git repositories..." | tee -a "$log_file"
-repos=$(find_git_dirs)
+    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Searching for Git repositories..." | tee -a "$log_file"
+    local repos=$(find_git_dirs)
 
-if [[ -z "$repos" ]]; then
-    echo "$(date '+[%Y-%m-%d %H:%M:%S]') No Git repositories found." | tee -a "$log_file"
-    exit 0
-fi
+    if [[ -z "$repos" ]]; then
+        echo "$(date '+[%Y-%m-%d %H:%M:%S]') No Git repositories found." | tee -a "$log_file"
+        exit 0
+    fi
 
-echo "$(date '+[%Y-%m-%d %H:%M:%S]') Found the following Git repositories (excluding specified directories):" | tee -a "$log_file"
-echo "$repos" | nl | tee -a "$log_file"
+    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Found the following Git repositories (excluding specified directories):" | tee -a "$log_file"
+    echo "$repos" | nl | tee -a "$log_file"
 
-read -rp "Do you want to update these repositories? (y/n): " confirm
-if [[ "$confirm" != "y" ]]; then
-    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Aborted by $USER." | tee -a "$log_file"
-    exit 0
-fi
+    read -rp "Do you want to update these repositories? (y/n): " confirm
+    if [[ "$confirm" != "y" ]]; then
+        echo "$(date '+[%Y-%m-%d %H:%M:%S]') Aborted by $USER." | tee -a "$log_file"
+        exit 0
+    fi
 
-# Clear previous logs and prepare summary files
-: > "$log_file"    # Clear the log file
-: > "$error_log"   # Clear the error log file
-success_file="$log_dir/successful_updates.txt"
-failure_file="$log_dir/failed_updates.txt"
-: > "$success_file"
-: > "$failure_file"
+    # Clear previous logs and prepare summary files
+    : > "$log_file"
+    : > "$error_log"
+    : > "$success_file"
+    : > "$failure_file"
 
-# Export the update function and log file paths for parallel
-export -f update_repo
-export log_file error_log success_file failure_file
+    # Export the update function and log file paths for parallel
+    export -f update_repo
+    export log_file error_log success_file failure_file
 
-# Update repositories in parallel and stream output
-echo "$(date '+[%Y-%m-%d %H:%M:%S]') Starting updates..." | tee -a "$log_file"
-echo "$repos" | parallel -j4 update_repo
+    # Update repositories in parallel and stream output
+    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Starting updates..." | tee -a "$log_file"
+    echo "$repos" | parallel -j4 update_repo
 
-# Generate summary
-success_count=$(wc -l < "$success_file" | tr -d ' ')
-failure_count=$(wc -l < "$failure_file" | tr -d ' ')
+    # Summarize results
+    summarize_results
 
-# Save and display summary
-: > "$summary_file"
-echo "$(date '+[%Y-%m-%d %H:%M:%S]') Summary of Git Updates:" | tee -a "$summary_file"
-echo "------------------------" | tee -a "$summary_file"
-echo "Successful updates: $success_count" | tee -a "$summary_file"
-echo "Failed updates:     $failure_count" | tee -a "$summary_file"
+    # Calculate and display total elapsed time
+    local end_time elapsed_time
+    end_time=$(date +%s)
+    elapsed_time=$((end_time - start_time))
+    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Total time taken: $((elapsed_time / 60)) minutes and $((elapsed_time % 60)) seconds." | tee -a "$summary_file" "$log_file"
 
-if [[ $success_count -gt 0 ]]; then
-    echo "Successfully updated repositories:" | tee -a "$summary_file"
-    cat < "$success_file" | tee -a "$summary_file"
-fi
+    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Update complete. Summary and logs are saved in $log_dir."
+}
 
-if [[ $failure_count -gt 0 ]]; then
-    echo "Repositories that failed to update:" | tee -a "$summary_file"
-    cat < "$failure_file" | tee -a "$summary_file"
-fi
-
-# Calculate and display total elapsed time
-end_time=$(date +%s)
-elapsed_time=$((end_time - start_time))
-echo "$(date '+[%Y-%m-%d %H:%M:%S]') Total time taken: $((elapsed_time / 60)) minutes and $((elapsed_time % 60)) seconds." | tee -a "$summary_file" "$log_file"
-
-echo "$(date '+[%Y-%m-%d %H:%M:%S]') Update complete. Summary and logs are saved in $log_dir."
+main "$@"
 
