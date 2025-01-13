@@ -1,0 +1,127 @@
+#!/bin/bash
+
+# Ensure fzf is installed
+if ! command -v fzf &> /dev/null; then
+    echo "fzf is not installed. Please install it before running this script."
+    exit 1
+fi
+
+# Default search path
+SEARCH_PATH="/"
+
+# Define directories to exclude
+EXCLUDE_DIRS=".git,.cache,node_modules"
+
+
+# Directory for logs and saved files
+DATA_DIR="$HOME/.local/share/fzf-files"
+SELECTIONS_LOG="$DATA_DIR/selections.log"
+COPIED_LOG="$DATA_DIR/copied.log"
+
+# Create necessary directories
+mkdir -p "$DATA_DIR"
+
+# Help function
+show_help() {
+    echo "Usage: fcf [OPTIONS]"
+    echo "Options:"
+    echo "  -r           Search in the root directory (default)."
+    echo "  -b           Search in the home directory."
+    echo "  -h, --help   Show this help message."
+    echo "  -l, --list   List previous file selections."
+    echo "  -d DEST_DIR  Specify a destination directory to copy files to (default is current directory)."
+    exit 0
+}
+
+list_previous_selections() {
+    if [[ ! -s "$SELECTIONS_LOG" ]]; then
+        echo "No previous selections found."
+        exit 0
+    fi
+
+    echo "Select a file from previous selections:"
+    SELECTED=$(cat "$SELECTIONS_LOG" | fzf --prompt="Select a file: " --preview="batcat --color=always --style=plain {} 2>/dev/null || head -n 20 {}" --preview-window=up:10)
+
+    if [[ -n "$SELECTED" ]]; then
+        echo "You selected: $SELECTED"
+    else
+        echo "No file selected."
+    fi
+    exit 0
+}
+
+# Default destination directory
+DEST_DIR="$PWD"
+
+# Parse options
+while  [[ "$1" != "" ]]; do
+    case "$1" in
+        -r)
+            SEARCH_PATH="/"
+            ;;
+        -b)
+            SEARCH_PATH="$HOME"
+            ;;
+        -h|--help)
+            show_help
+            ;;
+        -l|--list)
+            list_previous_selections
+            ;;
+        -d) 
+            shift
+            DEST_DIR="$1"
+            ;;
+        *)
+            echo "Invalid option: $1"
+            show_help
+            ;;
+    esac
+    shift
+done
+
+# Ensure the destination directory exists
+if [ ! -d "$DEST_DIR" ]; then
+    echo "Destination directory '$DEST_DIR' does not exist. Creating it..."
+    mkdir -p "$DEST_DIR"
+    if [ $? -ne 0 ]; then
+        echo "Failed to create destination directory. Exiting."
+        exit 1
+    fi
+fi
+
+# Build the find command with excluded directories
+FIND_CMD="find $SEARCH_PATH -type f"
+for DIR in $(echo $EXCLUDE_DIRS | tr ',' '\n'); do
+    FIND_CMD+=" ! -path '*/$DIR/*'"
+done
+
+# Search for files with multi-select enabled
+SELECTED_FILES=$(eval "$FIND_CMD" 2>/dev/null | fzf --multi --prompt="Select files to copy: " \
+    --preview="batcat --color=always --style=plain {} 2>/dev/null || head -n 20 {}" \
+    --preview-window=up:10)
+
+# Exit if no files are selected
+if [ -z "$SELECTED_FILES" ]; then
+    echo "No files selected. Exiting."
+    exit 0
+fi
+
+# Save selections to log
+echo "$SELECTED_FILES" >> "$SELECTIONS_LOG"
+
+echo "Selected files:" > "$COPIED_LOG"
+
+# Copy selected files to the current working directory
+echo "Copying selected files to the current directory..."
+for FILE in $SELECTED_FILES; do
+    echo "Copying '$FILE' to '$DEST_DIR'."
+    cp "$FILE" "$DEST_DIR" 
+    if [ $? -eq 0 ]; then
+        echo "Successfully copied '$FILE' to '$DEST_DIR."
+        echo "$FILE" >> "$COPIED_LOG"
+    else
+        echo "Failed to copy '$FILE'. Please check your permissions or path."
+    fi
+done <<< "$SELECTED_FILES"
+
