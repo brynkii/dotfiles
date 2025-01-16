@@ -1,30 +1,127 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
-word=${1:-$(xclip -o -selection primary)}
+API_URL="https://api.dictionaryapi.dev/api/v2/entries/en"
+NOTIFY_TIMEOUT=5000
+CACHE_DIR="$HOME/.local/share/dict"
+mkdir -p "$CACHE_DIR"
+LOG_FILE="$CACHE_DIR/dictionary_script.log"
 
-query=$(curl -s "https://api.dictionaryapi.dev/api/v2/entries/en_US/$word")
+# Fetch definition from the online API
+fetch_definition() {
+    local word=$1
+    curl -s "$API_URL/$word" | jq -r '.[0].meanings[0].definitions[:3][] | "• \(.definition)"'
+}
 
-[ -z "$query" ] && notify-send -h string:bgcolor:#bf616a -t 3000 "Invalid word." && exit 0
+# Fetch synonyms and antonyms
+fetch_synonyms_antonyms() {
+    local word=$1
+    curl -s "$API_URL/$word" | jq -r '.[0].meanings[0].definitions[0] | "Synonyms: \(.synonyms | join(", "))\nAntonyms: \(.antonyms | join(", "))"'
+}
 
-# Show only first 3 definitions
-def=$(echo "$query" | jq -r '[.[].meanings[] | {pos: .partOfSpeech, def: .definitions[].definition}] | .[:3].[] | "\n\(.pos). \(.def)"')
+# Fetch pronunciation audio URL
+fetch_pronunciation() {
+    local word=$1
+    curl -s "$API_URL/$word" | jq -r '.[0].phonetics[0].audio // empty'
+}
 
-# Requires a notification daemon to be installed
-notify-send -t 60000 "$word -" "$def"
+# Play pronunciation
+play_pronunciation() {
+    local audio_url=$(fetch_pronunciation "$1")
+    if [[ -n "$audio_url" ]]; then
+        curl -s "$audio_url" -o /tmp/word_pronunciation.mp3
+        mpg123 /tmp/word_pronunciation.mp3
+    fi
+}
 
+# Save to cache
+save_to_cache() {
+    local word=$1
+    local data=$2
+    echo "$data" > "$CACHE_DIR/$word.txt"
+}
 
-### MORE OPTIONS :)
+# Fetch from cache
+fetch_from_cache() {
+    local word=$1
+    cat "$CACHE_DIR/$word.txt" 2>/dev/null
+}
 
-# Show first definition for each part of speech (thanks @morgengabe1 on youtube)
-# def=$(echo "$query" | jq -r '.[0].meanings[] | "\(.partOfSpeech): \(.definitions[0].definition)\n"')
+# Log messages
+log_message() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
+}
 
-# Show all definitions
-# def=$(echo "$query" | jq -r '.[].meanings[] | "\n\(.partOfSpeech). \(.definitions[].definition)"')
+# Display saved definitions with fzf
+browse_saved_definitions() {
+    local selected_file
+    selected_file=$(find "$CACHE_DIR" -type f -printf "%f\n" | fzf --prompt="Select a word: " --preview "cat $CACHE_DIR/{}")
+    if [[ -n "$selected_file" ]]; then
+        cat "$CACHE_DIR/$selected_file" | xclip -selection clipboard
+        notify-send "Definition Copied" "Definition of '$selected_file' copied to clipboard." -t $NOTIFY_TIMEOUT
+    fi
+}
 
-# Regex + grep for just definition, if anyone prefers that to jq
-# def=$(grep -Po '"definition":"\K(.*?)(?=")' <<< "$query")
+# Display help
+show_help() {
+    echo "Usage: $(basename "$0") [OPTIONS]"
+    echo "Options:"
+    echo "  --offline      Use cached definitions only"
+    echo "  --word <word>  Define a specific word"
+    echo "  --browse       Browse saved definitions"
+    echo "  --help         Show this help message"
+}
 
-# bold=$(tput bold) # Print text bold with echo, for visual clarity
-# normal=$(tput sgr0) # Reset text to normal
-# echo "${bold}Definition of $word"
-# echo "${normal}$def"
+# Main function
+main() {
+    local mode="online"
+    local word=""
+
+    # Parse CLI arguments
+    case $1 in
+        --offline)
+            mode="offline"
+            ;;
+        --word)
+            word=$2
+            ;;
+        --browse)
+            browse_saved_definitions
+            exit 0
+            ;;
+        --help)
+            show_help
+            exit 0
+            ;;
+        *)
+            word=$(xclip -o -selection clipboard | tr -d '[:space:]')
+            ;;
+    esac
+
+    if [[ -z "$word" ]]; then
+        notify-send "Dictionary Lookup" "Clipboard is empty or contains no valid word." -t $NOTIFY_TIMEOUT
+        exit 0
+    fi
+
+    local data=""
+    if [[ "$mode" == "offline" ]]; then
+        data=$(fetch_from_cache "$word")
+    else
+        data=$(fetch_definition "$word")
+        if [[ -n "$data" && "$data" != "null" ]]; then
+            save_to_cache "$word" "$data"
+            data="$data\n$(fetch_synonyms_antonyms "$word")"
+            play_pronunciation "$word"
+        fi
+    fi
+
+    if [[ -n "$data" ]]; then
+        notify-send "Definition of '$word'" "$data" -t $NOTIFY_TIMEOUT
+        log_message "Definition fetched for '$word'."
+    else
+        notify-send "Dictionary Lookup" "No definition found for '$word'." -t $NOTIFY_TIMEOUT
+        log_message "No definition found for '$word'."
+    fi
+}
+
+main "$@"
+
