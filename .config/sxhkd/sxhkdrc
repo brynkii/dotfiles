@@ -35,6 +35,9 @@ alt + e
 
 alt + g
 	gimp
+
+alt + m
+	~/.local/bin/dict
 	
 alt + b
 	brave-browser
