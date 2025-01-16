@@ -32,6 +32,7 @@ return {
           'javascript',
           'json',
           'lua',
+          'odin',
           'make',
           'cmake',
           'markdown',

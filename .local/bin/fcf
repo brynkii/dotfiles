@@ -7,7 +7,7 @@ if ! command -v fzf &> /dev/null; then
 fi
 
 # Default search path
-SEARCH_PATH="/"
+SEARCH_PATH="$HOME"
 
 # Define directories to exclude
 EXCLUDE_DIRS=".git,.cache,node_modules"

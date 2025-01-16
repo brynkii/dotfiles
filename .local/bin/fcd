@@ -3,34 +3,77 @@
 # Temporary file to store the selected directory
 TEMP_FILE="/tmp/fzf_selected_dir"
 HIST_FILE="$HOME/.local/share/fcd/fcd.history"
+EXCLUDE_FILE="$HOME/.local/share/fcd/fcd.exclude"
 
-# Ensure history file exists
+# Ensure necessary files exist
 touch "$HIST_FILE"
+touch "$EXCLUDE_FILE"
 
-# Function to search directory history
-search_history() {
-    cat "$HIST_FILE" | sort -u | fzf --prompt="History: Select a directory: " --height=20 --reverse
+# Function to generate exclude arguments for find
+generate_exclude_args() {
+    while read -r line; do
+        echo "-not -path '$line'"
+    done < "$EXCLUDE_FILE"
 }
 
+# Function to dynamically switch between search modes
+dynamic_search() {
+    find "$HOME" -type d $(generate_exclude_args) 2>/dev/null | \
+    fzf --prompt="Home Search: Select a directory: " \
+        --height=20 --reverse \
+        --preview 'eza -l --tree --total-size --no-time --no-permissions --no-user {}' \
+        --bind "ctrl-h:reload(cat '$HIST_FILE' | sort -u)" \
+        --bind 'ctrl-r:reload(find / -maxdepth 5 -type d 2>/dev/null)' \
+        --header 'Ctrl-H: History | Ctrl-R: Root Search | Default: Home Search'
+}
 
-# Prompt the user to choose between history or file search
-echo "Choose a mode:"
-echo "1) History Search"
-echo "2) Directory Search"
-read -p "Enter choice (1 or 2): " MODE
+# Function to clean up history
+cleanup_history() {
+    echo "Cleaning up history file..."
+    local temp_file=$(mktemp)
+    while read -r dir; do
+        if [[ -d "$dir" ]]; then
+            echo "$dir" >> "$temp_file"
+        fi
+    done < "$HIST_FILE"
+    mv "$temp_file" "$HIST_FILE"
+    echo "History cleanup complete."
+}
 
-# Handle user selection
-case $MODE in
-    1)
-        SELECTED_DIR=$(search_history)
+# Function to display statistics
+show_statistics() {
+    local total_dirs=$(wc -l < "$HIST_FILE")
+    local unique_dirs=$(sort -u "$HIST_FILE" | wc -l)
+    echo "Total directories in history: $total_dirs"
+    echo "Unique directories in history: $unique_dirs"
+}
+
+# Function to display help
+show_help() {
+    echo "Usage: $(basename "$0") [OPTION]"
+    echo "Options:"
+    echo "  --stats, -s          Show history statistics"
+    echo "  --cleanup, -c        Clean up history file"
+    echo "  --help, -h           Show this help message"
+    echo "  [no option]          Default to dynamic directory search"
+}
+
+# Parse arguments
+case "$1" in
+    --cleanup|-c)
+        cleanup_history
+        exit 0
         ;;
-    2)
-        # Search directories with limited depth and exclude .git folders
-        SELECTED_DIR=$(find ~ -type d | fzf --prompt="Select a directory to navigate to: " --height=20 --reverse)
+    --stats|-s)
+        show_statistics
+        exit 0
+        ;;
+    --help|-h)
+        show_help
+        exit 0
         ;;
     *)
-        echo "Invalid choice."
-        exit 1
+        SELECTED_DIR=$(dynamic_search)
         ;;
 esac
 
@@ -51,3 +94,4 @@ else
     echo "No directory selected."
     > "$TEMP_FILE"
 fi
+

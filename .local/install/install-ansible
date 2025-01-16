@@ -1,6 +1,7 @@
 #!/bin/sh
-
-🐧🏡 Linux Homelab Init - Install CRI-O with Ansible from debs`sudo add-apt-repository --yes --update ppa:ansible/ansible
+[ -z "$(command -v ansible)" ] && echo "Ansible already present" && exit
+echo "🐧🏡 Linux Homelab Init - Install CRI-O with Ansible from debs"
+sudo add-apt-repository --yes --update ppa:ansible/ansible
 sudo apt install ansible
 sudo apt install python3-argcomplete
 sudo activate-global-python-argcomplete3
