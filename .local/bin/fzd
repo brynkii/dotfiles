@@ -8,7 +8,7 @@ if ! command -v fzf &> /dev/null; then
 fi
 
 # Default search path
-SEARCH_PATH="/"
+SEARCH_PATH="$HOME"
 EXCLUDE_DIRS=".git,.cache,node_modules"
 
 # Show help message
@@ -24,7 +24,7 @@ echo_help() {
 }
 
 # Default destination directory
-DEST_DIR="."
+DEST_DIR="$PWD"
 
 # Parse arguments
 while [[ "$1" != "" ]]; do

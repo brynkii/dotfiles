@@ -1,5 +1,12 @@
 #!/bin/sh
 
-clone docker/docker-install
+[ -z "$(command -v docker)" ] && echo "docker already installed" && exit
+dir="$REPOS/github/docker-install"
+mkdir -p "$(basename "$dir")"
+
+if [ ! -d "$dir" ]; then
+  gh repo clone docker/docker-install "$dir" || git clone git@github.com:docker/docker-install.git "$dir"
+fi
+ cd "$dir" || printf "No such dir" && exit
 ./install.sh
 dockerd-rootless-setuptool.sh install

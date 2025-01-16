@@ -1,4 +1,6 @@
 #!/bin/sh
+
+[ -z "$(command -v neo)" ] && echo "Neo already present" && exit
 sudo apt install autoconf
 sudo apt install build-essentials
 sudo apt install ncurses-base

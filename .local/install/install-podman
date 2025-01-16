@@ -1,5 +1,7 @@
 #!/bin/sh
 
+[ -z "$(command -v podman)" ] && echo "Podman already present" && exit
+
 sudo apt-get install -y podman
 sudo wget https://github.com/containers/gvisor-tap-vsock/releases/download/v0.6.2/gvproxy-linux \
   -O /usr/libexec/podman/gvproxy \

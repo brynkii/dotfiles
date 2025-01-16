@@ -1,0 +1,117 @@
+#!/bin/bash
+
+# Required tools check
+for cmd in batcat fzf pandoc gunzip eza pdftotext; do
+    if ! command -v $cmd &> /dev/null; then
+        echo "$cmd is not installed. Please install it before running this script."
+        exit 1
+    fi
+done
+
+# Define search paths (edit these paths as needed)
+SEARCH_PATHS=(
+    "/usr/share/doc"
+    "$HOME/.local/share/doc"
+    "/usr/share/info"
+    "/usr/local/share/doc"
+)
+
+# Collect documents from all specified paths
+DOC_FILES=""
+for SEARCH_PATH in "${SEARCH_PATHS[@]}"; do
+    echo "Searching for documents in '$SEARCH_PATH'..."
+    if [ -d "$SEARCH_PATH" ]; then
+        DOC_FILES+="$(find "$SEARCH_PATH" -type d -name doc -exec find {} -type f \;)\n"
+    else
+        echo "Warning: Path '$SEARCH_PATH' does not exist or is not a directory."
+    fi
+done
+
+# Remove trailing newlines from DOC_FILES
+DOC_FILES=$(echo -e "$DOC_FILES" | sed '/^$/d')
+
+if [ -z "$DOC_FILES" ]; then
+    echo "No documents found in the specified paths."
+    exit 0
+fi
+
+# Function to determine the preview layout based on terminal size
+get_preview_layout() {
+    local TERM_WIDTH=$(tput cols)
+    if [[ $TERM_WIDTH -lt 100 ]]; then
+        echo "up:50%:wrap" # Horizontal preview
+    else
+        echo "right:50%:wrap" # Vertical preview
+    fi
+}
+
+# Loop for multiple selections
+while true; do
+    # Determine the preview layout dynamically
+    PREVIEW_LAYOUT=$(get_preview_layout)
+
+    # Use fzf to select a file
+    SELECTED_FILE=$(echo -e "$DOC_FILES" | fzf \
+        --prompt="Select a document (Press ESC or 'q' to exit): " \
+        --preview="if file --mime {} | grep -q binary; then batcat -A --color=always {}; else batcat --style=plain --color=always {}; fi" \
+        --preview-window="$PREVIEW_LAYOUT" \
+        --layout=reverse)
+
+    # Exit if no file is selected
+    if [ -z "$SELECTED_FILE" ]; then
+        echo "No file selected. Exiting."
+        break
+    fi
+
+    echo "You selected: $SELECTED_FILE"
+
+    # Temporary file for processing
+    TEMP_FILE=$(mktemp)
+
+    # Handle gzipped files
+    if [[ "$SELECTED_FILE" == *.gz ]]; then
+        echo "Uncompressing .gz file for processing..."
+        gunzip -c "$SELECTED_FILE" > "$TEMP_FILE"
+
+        # Handle PDF files within .gz
+        if [[ "$SELECTED_FILE" == *.pdf.gz ]]; then
+            echo "Extracting text from PDF for viewing..."
+            pdftotext "$TEMP_FILE" - | batcat
+        else
+            batcat "$TEMP_FILE"
+        fi
+
+    # Handle PDF files
+    elif [[ "$SELECTED_FILE" == *.pdf ]]; then
+        echo "Extracting text from PDF for viewing..."
+        pdftotext "$SELECTED_FILE" - | batcat
+
+    # Handle HTML files
+    elif [[ "$SELECTED_FILE" == *.html ]]; then
+        echo "Converting HTML to Markdown for viewing..."
+        pandoc "$SELECTED_FILE" -o "$TEMP_FILE"
+        batcat "$TEMP_FILE"
+
+    # Handle DOCX files
+    elif [[ "$SELECTED_FILE" == *.docx ]]; then
+        echo "Extracting text from DOCX for viewing..."
+        pandoc "$SELECTED_FILE" -t plain -o "$TEMP_FILE"
+        batcat "$TEMP_FILE"
+
+    # Handle other file types
+    else
+        batcat "$SELECTED_FILE"
+    fi
+
+    # Cleanup
+    rm -f "$TEMP_FILE"
+
+    # Additional options after viewing
+    echo "Press Enter to return to the selection menu, 'q' to quit, or Ctrl+C to exit."
+    read -r USER_INPUT
+    if [[ "$USER_INPUT" == "q" ]]; then
+        echo "Exiting."
+        break
+    fi
+done
+
