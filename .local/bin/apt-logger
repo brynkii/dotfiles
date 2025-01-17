@@ -36,6 +36,7 @@ filter_by_date() {
 # Function to filter logs by package name
 filter_by_package() {
     local package="$1"
+		apt showsrc "$1"
     grep -i "$package" "$TEMP_FILE" > "${TEMP_FILE}.filtered"
     mv "${TEMP_FILE}.filtered" "$TEMP_FILE"
 }

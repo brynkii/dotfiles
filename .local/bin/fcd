@@ -21,7 +21,7 @@ dynamic_search() {
     find "$HOME" -type d $(generate_exclude_args) 2>/dev/null | \
     fzf --prompt="Home Search: Select a directory: " \
         --height=20 --reverse \
-        --preview 'eza -l --tree --total-size --no-time --no-permissions --no-user {}' \
+        --preview 'eza -l --tree --total-size --color=always --no-time --no-permissions --no-user {}' \
         --bind "ctrl-h:reload(cat '$HIST_FILE' | sort -u)" \
         --bind 'ctrl-r:reload(find / -maxdepth 5 -type d 2>/dev/null)' \
         --header 'Ctrl-H: History | Ctrl-R: Root Search | Default: Home Search'

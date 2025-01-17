@@ -72,7 +72,7 @@ done
 
 # Prompt user to select directories (multi-selection enabled)
 SELECTED_DIRS=$(eval "$FIND_CMD" 2>/dev/null | fzf --prompt="Select directories to copy: " --multi \
-    --preview="eza -l --no-user --no-time --no-permissions --total-size --tree --icons {}" --preview-window=right:50%)
+    --preview="eza -l --no-user --no-time --no-permissions --color=always --total-size --tree --icons {}" --preview-window=right:50%)
 
 # Exit if no directory is selected
 if [ -z "$SELECTED_DIRS" ]; then
