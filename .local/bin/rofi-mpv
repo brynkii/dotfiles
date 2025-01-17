@@ -1,39 +1,117 @@
 #!/bin/bash
 
-# Directory containing movies
 MOVIE_DIR="$HOME/Videos/movies"
+RATINGS_DIR="$HOME/.local/share/rofi-mpv"
+RATINGS_FILE="$RATINGS_DIR/ratings"
+HISTORY_FILE="$RATINGS_DIR/history"
 
-# Check if the directory exists
-if [ ! -d "$MOVIE_DIR" ]; then
-  echo "Error: Directory $MOVIE_DIR does not exist."
-  exit 1
-fi
+# Ensure the ratings and history directories/files exist
+mkdir -p "$RATINGS_DIR"
+touch "$RATINGS_FILE"
+touch "$HISTORY_FILE"
 
-# List movies in the directory
-MOVIES=$(find "$MOVIE_DIR" -type f \( -iname "*.mp4" -o -iname "*.mkv" -o -iname "*.avi" -o -iname "*.mov" \) | sort)
+# Function to list directories with ratings
+list_directories() {
+    while IFS= read -r dir; do
+        dir_name=$(basename "$dir")
+        rating=$(grep -F "$dir_name" "$RATINGS_FILE" | cut -d':' -f2)
+        if [ -n "$rating" ]; then
+            echo "$dir_name (⭐ $rating)"
+        else
+            echo "$dir_name"
+        fi
+    done < <(find "$MOVIE_DIR" -mindepth 1 -maxdepth 1 -type d | sort)
+}
 
-# Check if there are any movies
-if [ -z "$MOVIES" ]; then
-  echo "No movies found in $MOVIE_DIR."
-  exit 1
-fi
+# Function to log watch history
+log_history() {
+    local dir="$1"
+    local finished="$2"
+    local timestamp
+    timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+    echo "$timestamp | $dir | Finished: $finished" >> "$HISTORY_FILE"
+}
 
-# Create a mapping of movie names to full paths
-MOVIE_NAMES=$(echo "$MOVIES" | awk -F'/' '{print $NF}')
-MOVIE_MAP=$(paste -d '|' <(echo "$MOVIE_NAMES") <(echo "$MOVIES"))
+# Function to rate a directory
+rate_directory() {
+    local dir="$1"
+    rating=$(rofi -dmenu -p "Rate $dir (1-10):")
+    if [[ "$rating" =~ ^[1-9]$|^10$ ]]; then
+        grep -vF "$dir:" "$RATINGS_FILE" > "$RATINGS_FILE.tmp" && mv "$RATINGS_FILE.tmp" "$RATINGS_FILE"
+        echo "$dir:$rating" >> "$RATINGS_FILE"
+        notify-send "Rated $dir ⭐ $rating"
+    else
+        notify-send "Invalid rating. Please enter a number between 1 and 10."
+    fi
+}
 
-# Use rofi to select a movie
-SELECTED_MOVIE_NAME=$(echo "$MOVIE_NAMES" | rofi -dmenu -i -p "Select a movie:")
+# Function to view watch history in the terminal using fzf
+view_history() {
+    if [[ -s "$HISTORY_FILE" ]]; then
+        cat "$HISTORY_FILE" | fzf --preview "echo {}" --preview-window=down:5 --header="Press Enter to exit"
+    else
+        echo "No history available." | fzf --header="Press Enter to exit"
+    fi
+}
 
-# Check if a movie was selected
-if [ -z "$SELECTED_MOVIE_NAME" ]; then
-  echo "No movie selected."
-  exit 0
-fi
+# Function to show most-watched statistics
+show_statistics() {
+    if [[ -s "$HISTORY_FILE" ]]; then
+        echo "Most Watched Directories:"
+        awk -F' | ' '/Finished: Yes/ {count[$2]++} END {for (dir in count) print count[dir], dir}' "$HISTORY_FILE" | sort -nr
+        echo -e "\nHighest Rated Directories:"
+        awk -F':' '{print $2, $1}' "$RATINGS_FILE" | sort -nr | head -5
+        echo -e "\nTotal Hours Watched:"
+        grep -c "Finished: Yes" "$HISTORY_FILE"
+    else
+        echo "No statistics available."
+    fi | fzf --preview "echo {}" --preview-window=down:5 --header="Press Enter to exit"
+}
 
-# Map the selected name back to the full path
-SELECTED_MOVIE=$(echo "$MOVIE_MAP" | grep -F "$SELECTED_MOVIE_NAME" | awk -F'|' '{print $2}')
+# Help function
+show_help() {
+    echo -e "Usage: ./script.sh [OPTIONS]\n"
+    echo "Options:"
+    echo "  --help                 Show this help message."
+    echo "  --view-history         View watch history in an interactive fzf menu."
+    echo "  --show-statistics      Display most-watched statistics interactively."
+    echo "  (No arguments)         List and play movies by default."
+}
 
-# Play the selected movie with mpv
-mpv "$SELECTED_MOVIE"
+# Play movies by default
+play_movies() {
+    directory=$(list_directories | rofi -dmenu -p "Select a directory:")
+    if [ -n "$directory" ]; then
+        dir_path="$MOVIE_DIR/$directory"
+        if [ -d "$dir_path" ]; then
+            mpv "$dir_path"/*
+            finished=$(echo -e "Yes\nNo" | rofi -dmenu -p "Did you finish watching $directory?")
+            if [[ "$finished" == "Yes" ]]; then
+                log_history "$directory" "Yes"
+                rate_directory "$directory"
+            else
+                log_history "$directory" "No"
+                notify-send "No rating recorded for $directory."
+            fi
+        else
+            notify-send "Directory not found: $dir_path"
+        fi
+    fi
+}
+
+# Main logic
+case $1 in
+    -h|--help)
+        show_help
+        ;;
+    -v|--view-history)
+        view_history
+        ;;
+    -s|--show-statistics)
+        show_statistics
+        ;;
+    *)
+        play_movies
+        ;;
+esac
 

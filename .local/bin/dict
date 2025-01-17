@@ -15,7 +15,7 @@ fetch_definition() {
 # Fetch synonyms and antonyms
 fetch_synonyms_antonyms() {
     local word=$1
-    curl -s "$API_URL/$word" | jq -r '.[0].meanings[0].definitions[0] | "Synonyms: \(.synonyms | join(", "))\nAntonyms: \(.antonyms | join(", "))"'
+    curl -s "$API_URL/$word" | jq -r '.[0].meanings[0].definitions[:3] | "Synonyms: \(.synonyms | join(", "))\nAntonyms: \(.antonyms | join(", "))"'
 }
 
 # Fetch pronunciation audio URL
@@ -78,17 +78,17 @@ main() {
 
     # Parse CLI arguments
     case $1 in
-        --offline)
+        -o|--offline)
             mode="offline"
             ;;
-        --word)
+        -w|--word)
             word=$2
             ;;
-        --browse)
+        -b|--browse)
             browse_saved_definitions
             exit 0
             ;;
-        --help)
+        -h|--help)
             show_help
             exit 0
             ;;
