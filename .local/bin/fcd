@@ -4,10 +4,16 @@
 TEMP_FILE="/tmp/fzf_selected_dir"
 HIST_FILE="$HOME/.local/share/fcd/fcd.history"
 EXCLUDE_FILE="$HOME/.local/share/fcd/fcd.exclude"
+HOME_CACHE_FILE="$HOME/.local/share/fcd/home_cache.txt"
+ROOT_CACHE_FILE="$HOME/.local/share/fcd/root_cache.txt"
+LOG_FILE="$HOME/.local/share/fcd/cache_update.log"  # Log file for cache updates
 
 # Ensure necessary files exist
 touch "$HIST_FILE"
 touch "$EXCLUDE_FILE"
+touch "$HOME_CACHE_FILE"
+touch "$ROOT_CACHE_FILE"
+touch "$LOG_FILE"  # Create log file if it doesn't exist
 
 # Function to generate exclude arguments for find
 generate_exclude_args() {
@@ -18,13 +24,61 @@ generate_exclude_args() {
 
 # Function to dynamically switch between search modes
 dynamic_search() {
-    find "$HOME" -type d $(generate_exclude_args) 2>/dev/null | \
-    fzf --prompt="Home Search: Select a directory: " \
-        --height=20 --reverse \
-        --preview 'eza -l --tree --total-size --color=always --no-time --no-permissions --no-user {}' \
-        --bind "ctrl-h:reload(cat '$HIST_FILE' | sort -u)" \
-        --bind 'ctrl-r:reload(find / -maxdepth 5 -type d 2>/dev/null)' \
-        --header 'Ctrl-H: History | Ctrl-R: Root Search | Default: Home Search'
+    local cache_file
+    local search_path
+
+    # Determine cache file and search path
+    if [[ "$1" == "home" ]]; then
+        cache_file="$HOME_CACHE_FILE"
+        search_path="$HOME"
+    elif [[ "$1" == "root" ]]; then
+        cache_file="$ROOT_CACHE_FILE"
+        search_path="/"
+    fi
+
+    # Check if the cache exists, is valid, and not empty
+    if [[ -f "$cache_file" && -s "$cache_file" && ! $(find "$cache_file" -mmin +5) ]]; then
+        # Use cached results immediately if valid and not empty
+        SELECTED_DIR=$(cat "$cache_file" | fzf --prompt="Select a directory: " --height=20 --reverse \
+            --preview 'eza -l --tree --total-size --color=always --no-time --no-permissions --no-user {}' \
+            --bind "ctrl-h:reload(find $HOME -type d $(generate_exclude_args) 2>/dev/null)" \
+            --bind "ctrl-a:reload(cat '$HIST_FILE' | sort -u)" \
+            --bind "ctrl-r:reload(find / -maxdepth 5 -type d 2>/dev/null)" \
+            --header 'Ctrl-H: Home Search | Ctrl-A: History Search | Ctrl-R: Root Search')
+    else
+        # If no valid cache or empty cache, perform a fresh search and cache the result
+        find "$search_path" -type d $(generate_exclude_args) 2>/dev/null > "$cache_file"
+
+        # Now display the directories with fzf
+        SELECTED_DIR=$(cat "$cache_file" | fzf --prompt="Select a directory: " --height=20 --reverse \
+            --preview 'eza -l --tree --total-size --color=always --no-time --no-permissions --no-user {}' \
+            --bind "ctrl-h:reload(find $HOME -type d $(generate_exclude_args) 2>/dev/null)" \
+            --bind "ctrl-a:reload(cat '$HIST_FILE' | sort -u)" \
+            --bind "ctrl-r:reload(find / -maxdepth 5 -type d 2>/dev/null)" \
+            --header 'Ctrl-H: Home Search | Ctrl-A: History Search | Ctrl-R: Root Search')
+
+        # Update the cache in the background if directories are found
+        if [[ -n "$SELECTED_DIR" ]]; then
+            update_cache "$cache_file" "$search_path" &
+        fi
+    fi
+}
+
+# Function to update the cache manually
+update_cache() {
+    local cache_file="$1"
+    local search_path="$2"
+
+    # Update the cache
+    find "$search_path" -type d $(generate_exclude_args) 2>/dev/null > "$cache_file"
+    
+    # Notify user that the cache update is complete
+    notify-send "Cache Update Complete" "The directory cache has been updated for $search_path."
+    
+    # Log the cache update
+    echo "$(date) - Cache updated for $search_path" >> "$LOG_FILE"
+
+    echo "Cache update complete for $search_path."
 }
 
 # Function to clean up history
@@ -54,6 +108,7 @@ show_help() {
     echo "Options:"
     echo "  --stats, -s          Show history statistics"
     echo "  --cleanup, -c        Clean up history file"
+    echo "  --update-cache, -u   Manually update the cache"
     echo "  --help, -h           Show this help message"
     echo "  [no option]          Default to dynamic directory search"
 }
@@ -68,12 +123,18 @@ case "$1" in
         show_statistics
         exit 0
         ;;
+    --update-cache|-u)
+        update_cache "$HOME_CACHE_FILE" "$HOME"
+        update_cache "$ROOT_CACHE_FILE" "/"
+        exit 0
+        ;;
     --help|-h)
         show_help
         exit 0
         ;;
     *)
-        SELECTED_DIR=$(dynamic_search)
+        # Use dynamic search for both home and root
+        dynamic_search "home"
         ;;
 esac
 
