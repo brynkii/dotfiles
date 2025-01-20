@@ -1,13 +1,44 @@
 #!/bin/bash
 
-export FZF_DEFAULT_OPTS="-e -i --info=default --cycle --layout=reverse --scroll-off=5 --preview-window=wrap --tiebreak=index --bind  'home:first,end:last,tab:down,shift-tab:up'"
-man -k . \
-  | fzf  \
-    -q "$1" \
+export FZF_DEFAULT_OPTS="-e -i --info=default --cycle --layout=reverse --scroll-off=5 --preview-window=wrap --bind 'ctrl-q:abort,esc:abort'"
+
+cache_file="/tmp/man_cache.txt"
+help_message="
+HELP MENU:
+- ENTER: Open the selected manual page
+- CTRL-T: Switch to TLDR preview
+- CTRL-R: Reset to default man preview
+- CTRL-H: Show this help menu
+- CTRL-Q: Quit
+- ESC: Quit
+"
+
+# Cache the man -k results
+if [[ ! -f $cache_file || $(find "$cache_file" -mmin +5) ]]; then
+  man -k . > "$cache_file"
+fi
+
+while true; do
+  # FZF for selecting commands with additional features
+  selection=$(cat "$cache_file" | fzf \
     --ansi \
     --prompt=' Man > ' \
-    --preview-window '50%,rounded,<50(down,80%,border-bottom)' \
-    --preview $'echo {} | tr -d \'()\' | awk \'{printf "%s ", $2} {print $1}\' | xargs -r man' \
-    --bind "ctrl-b:+change-preview(man {1} | col -bx | batcat --language=man --plain --color always --theme=\"Monokai Extended\")+change-prompt( Man >)" \
+    --preview 'man {1} | col -bx | batcat --language=man --plain --color always --theme="Monokai Extended"' \
     --bind "ctrl-t:+change-preview(tldr --color {1})+change-prompt( TLDR > )" \
-  | tr -d '()' | awk '{printf "%s ", $2} {print $1}' | xargs -r man
+    --bind "ctrl-r:+change-preview(man {1})+change-prompt( Man >)" \
+    --bind "ctrl-h:+change-preview(echo -e '$help_message')+change-prompt( Help > )" \
+    --bind "ctrl-q:abort" \
+    --preview-window '50%,rounded,<50(down,80%,border-bottom)')
+
+  # Exit if no selection
+  [[ -z "$selection" ]] && break
+
+  # Extract command (skip the section number and parentheses)
+  command=$(echo "$selection" | awk '{print $1}')
+
+  # Open the manual page for the selected command
+  if ! man "$command"; then
+    echo "Error: Manual page for '$command' not found." >&2
+  fi
+done
+
