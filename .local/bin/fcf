@@ -6,17 +6,15 @@ if ! command -v fzf &> /dev/null; then
     exit 1
 fi
 
-# Default search path
-SEARCH_PATH="$HOME"
-
-# Define directories to exclude
-EXCLUDE_DIRS=".git,.cache,node_modules"
-
-
-# Directory for logs and saved files
+# Directory for logs, cache, and saved files
 DATA_DIR="$HOME/.local/share/fzf-files"
 SELECTIONS_LOG="$DATA_DIR/selections.log"
 COPIED_LOG="$DATA_DIR/copied.log"
+HOME_CACHE="$DATA_DIR/home_cache.txt"
+ROOT_CACHE="$DATA_DIR/root_cache.txt"
+
+# Define directories to exclude
+EXCLUDE_DIRS=".git,.cache,node_modules"
 
 # Create necessary directories
 mkdir -p "$DATA_DIR"
@@ -25,14 +23,14 @@ mkdir -p "$DATA_DIR"
 show_help() {
     echo "Usage: fcf [OPTIONS]"
     echo "Options:"
-    echo "  -r           Search in the root directory (default)."
-    echo "  -b           Search in the home directory."
     echo "  -h, --help   Show this help message."
-    echo "  -l, --list   List previous file selections."
+    echo "  -u, --update Update the cache for both root and home directories."
     echo "  -d DEST_DIR  Specify a destination directory to copy files to (default is current directory)."
+    echo "  -e, --exclude-dirs  Comma-separated list of directories to exclude from the search."
     exit 0
 }
 
+# Function to list previous selections
 list_previous_selections() {
     if [[ ! -s "$SELECTIONS_LOG" ]]; then
         echo "No previous selections found."
@@ -50,17 +48,53 @@ list_previous_selections() {
     exit 0
 }
 
+# Function to update the cache
+update_cache() {
+    local search_path="$1"
+    local cache_file="$2"
+    echo "Updating cache for: $search_path..."
+    local find_cmd="find $search_path -type f"
+    for dir in $(echo "$EXCLUDE_DIRS" | tr ',' '\n'); do
+        find_cmd+=" ! -path '*/$dir/*'"
+    done
+    echo "$search_path" > "$cache_file"
+    eval "$find_cmd" 2>/dev/null >> "$cache_file"
+    echo "Cache updated at: $cache_file"
+}
+
+# Update all caches
+update_all_caches() {
+    update_cache "$HOME" "$HOME_CACHE"
+    update_cache "/" "$ROOT_CACHE"
+}
+
+# Function to handle file name collisions
+handle_name_collision() {
+    local file_path="$1"
+    local dest_dir="$2"
+    local base_name=$(basename "$file_path")
+    local extension="${base_name##*.}"
+    local file_name="${base_name%.*}"
+    local counter=1
+
+    while [[ -e "$dest_dir/$base_name" ]]; do
+        base_name="${file_name}_$counter.$extension"
+        ((counter++))
+    done
+
+    echo "$base_name"
+}
+
 # Default destination directory
 DEST_DIR="$PWD"
 
 # Parse options
-while  [[ "$1" != "" ]]; do
+UPDATE_CACHE=false
+while [[ "$1" != "" ]]; do
     case "$1" in
-        -r)
-            SEARCH_PATH="/"
-            ;;
-        -b)
-            SEARCH_PATH="$HOME"
+        -d)
+            shift
+            DEST_DIR="$1"
             ;;
         -h|--help)
             show_help
@@ -68,9 +102,11 @@ while  [[ "$1" != "" ]]; do
         -l|--list)
             list_previous_selections
             ;;
-        -d) 
-            shift
-            DEST_DIR="$1"
+        -u|--update)
+            UPDATE_CACHE=true
+            ;;
+        -e|--exclude-dirs)
+            EXCLUDE_DIRS="$1"
             ;;
         *)
             echo "Invalid option: $1"
@@ -90,16 +126,28 @@ if [ ! -d "$DEST_DIR" ]; then
     fi
 fi
 
-# Build the find command with excluded directories
-FIND_CMD="find $SEARCH_PATH -type f"
-for DIR in $(echo $EXCLUDE_DIRS | tr ',' '\n'); do
-    FIND_CMD+=" ! -path '*/$DIR/*'"
-done
+# Update cache if requested
+if $UPDATE_CACHE; then
+    update_all_caches
+fi
 
-# Search for files with multi-select enabled
-SELECTED_FILES=$(eval "$FIND_CMD" 2>/dev/null | fzf --multi --prompt="Select files to copy: " \
-    --preview="batcat --color=always --style=plain {} 2>/dev/null || head -n 20 {}" \
-    --preview-window=up:10)
+# Ensure both caches exist
+if [[ ! -f "$HOME_CACHE" ]] || [[ ! -f "$ROOT_CACHE" ]]; then
+    echo "Caches are missing. Updating both caches..."
+    update_all_caches
+fi
+
+# Launch fzf for selection (defaulting to Home cache)
+fzf_combined_content() {
+    cat "$HOME_CACHE" | tail -n +2 | fzf --multi --prompt="Select files: " \
+        --bind "ctrl-h:reload(cat $HOME_CACHE | tail -n +2),ctrl-r:reload(cat $ROOT_CACHE | tail -n +2),ctrl-s:reload(cat $SELECTIONS_LOG),ctrl-c:abort" \
+        --preview="batcat --color=always --style=plain {} 2>/dev/null || head -n 20 {}" \
+        --preview-window=up:10 \
+        --header="Ctrl-H: Home (Default), Ctrl-R: Root, Ctrl-S: History, Ctrl-C: Exit"
+}
+
+# Execute fzf to select files
+SELECTED_FILES=$(fzf_combined_content)
 
 # Exit if no files are selected
 if [ -z "$SELECTED_FILES" ]; then
@@ -112,16 +160,20 @@ echo "$SELECTED_FILES" >> "$SELECTIONS_LOG"
 
 echo "Selected files:" > "$COPIED_LOG"
 
-# Copy selected files to the current working directory
-echo "Copying selected files to the current directory..."
-for FILE in $SELECTED_FILES; do
-    echo "Copying '$FILE' to '$DEST_DIR'."
-    cp "$FILE" "$DEST_DIR" 
+# Copy selected files to the destination directory
+echo "Copying selected files to '$DEST_DIR'..."
+while IFS= read -r FILE; do
+    DEST_NAME=$(handle_name_collision "$FILE" "$DEST_DIR")
+    DEST_PATH="$DEST_DIR/$DEST_NAME"
+    cp "$FILE" "$DEST_PATH"
+
     if [ $? -eq 0 ]; then
-        echo "Successfully copied '$FILE' to '$DEST_DIR."
-        echo "$FILE" >> "$COPIED_LOG"
+        echo "Successfully copied '$FILE' to '$DEST_PATH'."
+        echo "$DEST_PATH" >> "$COPIED_LOG"
     else
         echo "Failed to copy '$FILE'. Please check your permissions or path."
     fi
 done <<< "$SELECTED_FILES"
+
+echo "File copying complete. Logs saved to '$COPIED_LOG'."
 
