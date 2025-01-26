@@ -1,11 +1,67 @@
 #!/bin/bash
 
-# Highlight processes with CPU usage > 10% and sort by CPU usage
-ps -eo pid,user,%cpu,%mem,command --sort=-%cpu | awk 'NR==1 || $4 > 02.0' | \
-fzf --height 40% --layout=reverse --header-lines=1 --prompt="Select process to kill: " | \
-awk '{print $1}' | xargs -r bash -c "
-if ! kill $1 2> /dev/null; then 
-  echo "Failed to kill process "$1". Attempting with sudo..."
-  sudo kill $1 || echo "Failed to kill process "$1" even with sudo."
-fi" --
+# Default thresholds for CPU and memory usage
+CPU_THRESHOLD=${1:-10.0}
+MEM_THRESHOLD=${2:-2.0}
+
+# Ensure `fzf` is installed
+if ! command -v fzf &> /dev/null; then
+  echo "Error: 'fzf' is not installed. Please install it and try again."
+  exit 1
+fi
+
+# Get a list of programs exceeding thresholds, group by command name, and sort by usage
+program_list=$(ps -eo comm,%cpu,%mem --sort=-%mem | \
+awk -v cpu_thresh="$CPU_THRESHOLD" -v mem_thresh="$MEM_THRESHOLD" \
+'NR==1 || $2 > cpu_thresh || $3 > mem_thresh' | \
+sort | uniq -c | sort -n)
+
+# Exit if no programs match
+if [[ -z "$program_list" ]]; then
+  echo "No programs exceeding CPU > $CPU_THRESHOLD% or MEM > $MEM_THRESHOLD%."
+  exit 0
+fi
+
+# Use `fzf` to select a program
+selected_program=$(echo "$program_list" | fzf --height 40% --layout=reverse --header-lines=1 \
+  --prompt="Select program to kill: ")
+
+# Exit if no program was selected
+if [[ -z "$selected_program" ]]; then
+  echo "No program selected. Exiting."
+  exit 0
+fi
+
+# Extract the program name from the selection
+program_name=$(echo "$selected_program" | awk '{print $2}')
+
+# Find all PIDs of the selected program
+pids=$(pgrep "$program_name")
+
+# Exit if no PIDs found (just in case)
+if [[ -z "$pids" ]]; then
+  echo "No running processes found for program: $program_name."
+  exit 1
+fi
+
+# Confirm before killing all processes of the program
+echo "The following PIDs belong to the program '$program_name': $pids"
+read -rp "Do you want to kill all of them? [y/N]: " confirm
+if [[ "$confirm" =~ ^[Yy]$ ]]; then
+  # Kill all processes of the program
+  for pid in $pids; do
+    if kill "$pid" 2> /dev/null; then
+      echo "Successfully killed PID $pid of program $program_name."
+    else
+      echo "Failed to kill PID $pid. Attempting with sudo..."
+      if sudo kill "$pid"; then
+        echo "Successfully killed PID $pid with sudo."
+      else
+        echo "Failed to kill PID $pid even with sudo."
+      fi
+    fi
+  done
+else
+  echo "No processes were killed."
+fi
 
