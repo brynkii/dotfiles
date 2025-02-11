@@ -1,0 +1,35 @@
+#!/bin/bash
+# Move files between tmux panes
+# Select files from the current pane and move them to the target pane
+
+# Get the active pane and target pane
+src_pane=$(tmux display-message -p "#D")
+target_pane=$(tmux list-panes -F "#{pane_id}" | grep -v "${src_pane}" | fzf --prompt="Select target pane: ")
+
+# Ensure a target pane is selected
+if [ -z "$target_pane" ]; then
+    echo "No target pane selected. Exiting."
+    exit 1
+fi
+
+# Get the working directories of both panes
+src_dir=$(tmux display-message -p -F "#{pane_current_path}")
+dest_dir=$(tmux display-message -p -t "$target_pane" -F "#{pane_current_path}")
+
+# Select files to move
+cd "$src_dir" || exit
+selected_files=$(ls -1A | fzf --multi --prompt="Select files to move: ")
+
+# Ensure files are selected
+if [ -z "$selected_files" ]; then
+    echo "No files selected. Exiting."
+    exit 1
+fi
+
+# Move files to the target directory
+for file in $selected_files; do
+    mv "$src_dir/$file" "$dest_dir/"
+done
+
+echo "Files moved to $dest_dir"
+

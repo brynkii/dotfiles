@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Default thresholds for CPU and memory usage
-CPU_THRESHOLD=${1:-10.0}
-MEM_THRESHOLD=${2:-2.0}
+CPU_THRESHOLD=${1:-0.0}
+MEM_THRESHOLD=${2:-0.0}
 
 # Ensure `fzf` is installed
 if ! command -v fzf &> /dev/null; then
