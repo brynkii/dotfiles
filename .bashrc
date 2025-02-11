@@ -623,3 +623,8 @@ unset __conda_setup
 # <<< conda initialize <<<
 
 [[ ! ${BLE_VERSION-} ]] || ble-attach
+
+# Added by LM Studio CLI (lms)
+export PATH="$PATH:/home/brian/.lmstudio/bin"
+
+[ -f "/home/brian/.ghcup/env" ] && . "/home/brian/.ghcup/env" # ghcup-env
