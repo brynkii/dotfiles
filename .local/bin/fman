@@ -28,7 +28,7 @@ while true; do
     --bind "ctrl-r:+change-preview(man {1})+change-prompt( Man >)" \
     --bind "ctrl-h:+change-preview(echo -e '$help_message')+change-prompt( Help > )" \
     --bind "ctrl-q:abort" \
-    --preview-window '50%,rounded,<50(down,80%,border-bottom)')
+    --preview-window '50%,rounded,<50(down,70%,border-bottom)')
 
   # Exit if no selection
   [[ -z "$selection" ]] && break
