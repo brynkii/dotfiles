@@ -32,7 +32,8 @@ log_book() {
     local rating="$5"
 
     # Escape commas in book name for CSV compatibility
-    local escaped_book=$(printf '%s' "$book" | sed 's/,/\\,/g')
+    local escaped_book
+    escaped_book=$(printf '%s' "$book" | sed 's/,/\\,/g')
 
     # Check if the log file exists and has a header. If not, create it.
     if [[ ! -s "$BOOK_LOG_FILE" ]]; then
@@ -105,19 +106,17 @@ analyze_log() {
     output+="$rated_books\n"
 
     # Display the output using rofi
-    printf "%s" "$output" | rofi -dmenu -p "Log Analysis"
-    local selected_analysis=$(printf "%s" "$output" | rofi -dmenu -p "Log Analysis")
+    local selected_analysis
+    selected_analysis=$(printf "%s" "$output" | rofi -dmenu -p "Log Analysis")
     if [[ -z "$selected_analysis" ]]; then
         return 1 # User pressed Escape or closed rofi, go back
     fi
-
 }
 
 # Handle command-line arguments
-RECURSIVE=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -r|--recursive) RECURSIVE=1; shift ;;
+    -r|--recursive) shift ;;  # RECURSIVE variable removed as it was unused
     *) break ;;
   esac
 done
@@ -165,8 +164,7 @@ while true; do
 
     case "$SELECTED_OPTION" in
         0) # Select a book
-            SELECTED_INDEX=$(printf "%s\n" "${BOOK_NAMES[@]}" | rofi -dmenu -i -p "Select a book:" -format i)
-            if [[ $? -ne 0 ]]; then
+            if ! SELECTED_INDEX=$(printf "%s\n" "${BOOK_NAMES[@]}" | rofi -dmenu -i -p "Select a book:" -format i); then
                 printf "Error: rofi failed to run. Is it installed?\n"
                 exit 1
             fi
@@ -193,13 +191,13 @@ while true; do
             book_name=$(basename "$SELECTED_BOOK")
 
             # Prompt if the book is finished and get rating
-            read -r -p "Did you finish reading '$book_name'? [y/N] " finished | rofi -dmenu -i -p "is the book finished?"
+            finished=$(rofi -dmenu -i -p "Did you finish reading '$book_name'? [y/N]")
             finished="${finished:-n}"
 
             rating=""
             if [[ "$finished" == [yY] ]]; then
                 while true; do
-                    read -r -p "Rate the book (1-10): " rating
+                    rating=$(rofi -dmenu -i -p "Rate the book (1-10):")
                     if [[ "$rating" =~ ^[1-9]$|^10$ ]]; then # Validate rating
                         break
                     else
@@ -217,12 +215,12 @@ while true; do
                 printf "No recent books found.\n"
                 continue # Go back to the main menu
             fi
-            RECENT_BOOKS=$(cat "$RECENT_BOOKS_FILE" 2>/dev/null | sort -u)
+            RECENT_BOOKS=$(sort -u "$RECENT_BOOKS_FILE" 2>/dev/null)
             if [[ -z "$RECENT_BOOKS" ]]; then
                 printf "No recent books found.\n"
                 continue # Go back to the main menu
             fi
-            printf "%s\0" "$RECENT_BOOKS" | rofi -dmenu -i -p "Recent books:" -format i -d | read -r -d '' SELECTED_BOOK_NAME
+            SELECTED_BOOK_NAME=$(printf "%s\0" "$RECENT_BOOKS" | rofi -dmenu -i -p "Recent books:" -format i -d)
             if [[ -z "$SELECTED_BOOK_NAME" ]]; then
                 continue # Go back to the main menu
             fi

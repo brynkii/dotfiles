@@ -607,20 +607,6 @@ source /home/brian/.config/broot/launcher/bash/br
 export PATH="/home/brian/.config/herd-lite/bin:$PATH"
 export PHP_INI_SCAN_DIR="/home/brian/.config/herd-lite/bin:$PHP_INI_SCAN_DIR"
 
-# >>> conda initialize >>>
-# !! Contents within this block are managed by 'conda init' !!
-__conda_setup="$('/home/brian/anaconda3/bin/conda' 'shell.bash' 'hook' 2> /dev/null)"
-if [ $? -eq 0 ]; then
-    eval "$__conda_setup"
-else
-    if [ -f "/home/brian/anaconda3/etc/profile.d/conda.sh" ]; then
-        . "/home/brian/anaconda3/etc/profile.d/conda.sh"
-    else
-        export PATH="/home/brian/anaconda3/bin:$PATH"
-    fi
-fi
-unset __conda_setup
-# <<< conda initialize <<<
 
 [[ ! ${BLE_VERSION-} ]] || ble-attach
 
