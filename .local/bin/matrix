@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+
+# Courtesy of @bvierra and company (long ago, pre-cPanel)
+
+tput smcup  # Save screen state
+tput civis  # Hide cursor
+
+### Customization:
+blue=$'\e[0;34m'
+brightblue=$'\e[1;34m'
+cyan=$'\e[0;36m'
+brightcyan=$'\e[1;36m'
+green=$'\e[0;32m'
+brightgreen=$'\e[1;32m'
+red=$'\e[0;31m'
+brightred=$'\e[1;31m'
+white=$'\e[1;37m'
+black=$'\e[0;30m'
+grey=$'\e[0;37m'
+darkgrey=$'\e[1;30m'
+
+# Choose the colors that will be used from the above list
+# space-separated list
+# e.g. `colors=($green $brightgreen $darkgrey $white)`
+colors=("$green" "$brightgreen" "$blue" "$brightblue" "$red" "$brightred" "$black" "$white" "$cyan" "$brightcyan" "$grey" "$darkgrey")
+### End customization
+
+### Do not edit below this line
+spacing=${1:-100} # the likelihood of a character being left in place
+scroll=${5:-0} # 0 for static, positive integer determines scroll speed
+screenlines=$(($(tput lines) - 1 + scroll))
+screencols=$(($(tput cols) / 2 - 1))
+
+# chars=(a b c d e f g h i j k l m n o p q r s t u v w x y z A B C D E F G H I J K L M N O P Q R S T U V W X Y Z 0 1 2 3 4 5 6 7 8 9 ^)
+# charset via Carl:
+chars=(ｱ ｲ ｳ ｴ ｵ ｶ ｷ ｸ ｹ ｺ ｻ ｼ ｽ ｾ ｿ ﾀ ﾁ ﾂ ﾃ ﾄ ﾅ ﾆ ﾇ ﾈ ﾉ ﾊ ﾋ ﾌ ﾍ ﾎ ﾏ ﾐ ﾑ ﾒ ﾓ ﾔ ﾕ ﾖ ﾗ ﾘ ﾙ ﾚ ﾛ ﾜ ﾝ)
+
+count=${#chars[@]}
+colorcount=${#colors[@]}
+
+trap "tput sgr0; clear; exit" SIGTERM SIGINT
+
+if [[ "$1" =~ '-h' ]]; then
+	printf "Display a Matrix(ish) screen in the terminal\n"
+	printf "Usage:		matrix [SPACING [SCROLL]]\n"
+	printf "Example:	matrix 100 0\n"
+	printf "Press 'q' to quit.\n"
+	exit 0
+fi
+
+clear
+tput cup 0 0
+
+# Function to check for 'q' key press
+check_for_quit() {
+	# Read input with a timeout of 0.1 seconds
+	read -rsn1 -t 0.1 input
+	if [[ "$input" == "q" ]]; then
+		tput sgr0
+		clear
+		exit 0
+	fi
+}
+
+while true; do
+	# Check for 'q' key press
+	check_for_quit
+
+	for ((i = 1; i <= screenlines; i++)); do
+		for ((j = 1; j <= screencols; j++)); do
+			rand=$((RANDOM % spacing))
+			case $rand in
+				0)
+					printf "%s%s " "${colors[$((RANDOM % colorcount))]}" "${chars[$((RANDOM % count))]}"
+					;;
+				1)
+					printf "  "
+					;;
+				*)
+					printf "\033[2C"
+					;;
+			esac
+		done
+		printf "\n"
+	done
+	tput cup 0 0
+done
