@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+
 for i in {0..255}; do
-  printf "\e[38;5;${i}m$i "
+  printf "\\e[38;5;%sm%s " "$i" "$i"
 done
+printf "\\e[0m\n" # Reset color and add a newline at the end.
