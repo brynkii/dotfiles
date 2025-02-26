@@ -1,0 +1,171 @@
+#!/bin/bash
+
+LOG_DIR="/var/log/apt"
+LOG_FILES=("$LOG_DIR/history.log" "$LOG_DIR/history.log.*.gz")
+TEMP_FILE=$(mktemp)
+
+# Color codes for highlighting
+COLOR_RESET="\033[0m"
+COLOR_GREEN="\033[32m"
+COLOR_RED="\033[31m"
+COLOR_YELLOW="\033[33m"
+
+# Month names and their corresponding numbers
+declare -A MONTHS=(
+    [Jan]=01 [Feb]=02 [Mar]=03 [Apr]=04 [May]=05 [Jun]=06
+    [Jul]=07 [Aug]=08 [Sep]=09 [Oct]=10 [Nov]=11 [Dec]=12
+)
+
+# Function to parse logs
+parse_logs() {
+    local log_file="$1"
+    if [[ "$log_file" == *.gz ]]; then
+        zcat "$log_file" | grep -E "^(Start-Date:|Commandline:|Install:|Upgrade:|Remove:)" >> "$TEMP_FILE"
+    else
+        grep -E "^(Start-Date:|Commandline:|Install:|Upgrade:|Remove:)" "$log_file" >> "$TEMP_FILE"
+    fi
+}
+
+# Function to convert month name to number
+month_to_number() {
+    local month="$1"
+    echo "${MONTHS[$month]}"
+}
+
+# Function to filter logs by month and year
+filter_by_month_year() {
+    local start_month="$1"
+    local start_year="$2"
+    local end_month="$3"
+    local end_year="$4"
+
+    # Convert month names to numbers
+    start_month=$(month_to_number "$start_month")
+    end_month=$(month_to_number "$end_month")
+
+    # Convert to YYYY-MM format for comparison
+    start_date="$start_year-$start_month"
+    end_date="$end_year-$end_month"
+
+    awk -v start="$start_date" -v end="$end_date" '
+    /^Start-Date:/ {
+        gsub("Start-Date: ", "", $0)
+        split($0, date_parts, " ")
+        log_date = date_parts[1] "-" date_parts[2]
+        if (log_date >= start && log_date <= end) print $0
+    }' "$TEMP_FILE" > "${TEMP_FILE}.filtered"
+    mv "${TEMP_FILE}.filtered" "$TEMP_FILE"
+}
+
+# Function to filter logs by package name
+filter_by_package() {
+    local package="$1"
+    grep -i "$package" "$TEMP_FILE" > "${TEMP_FILE}.filtered"
+    mv "${TEMP_FILE}.filtered" "$TEMP_FILE"
+}
+
+# Function to generate a report with color-coded output
+generate_report() {
+    echo -e "${COLOR_YELLOW}APT Report:${COLOR_RESET}"
+    awk -v green="$COLOR_GREEN" -v red="$COLOR_RED" -v yellow="$COLOR_YELLOW" -v reset="$COLOR_RESET" '
+    BEGIN {
+        date = ""; install_list = ""; upgrade_list = ""; remove_list = ""; total_installed = 0; total_upgraded = 0; total_removed = 0
+    }
+    /^Start-Date:/ {
+        if (date != "") {
+            print date
+            if (install_list != "") print "  Installed: " green install_list reset
+            if (upgrade_list != "") print "  Upgraded: " yellow upgrade_list reset
+            if (remove_list != "") print "  Removed: " red remove_list reset
+            print ""
+        }
+        date = $0
+        install_list = ""; upgrade_list = ""; remove_list = ""
+    }
+    /Install:/ {
+        sub(/Install: /, "", $0)
+        install_list = install_list " " $0
+        total_installed++
+    }
+    /Upgrade:/ {
+        sub(/Upgrade: /, "", $0)
+        upgrade_list = upgrade_list " " $0
+        total_upgraded++
+    }
+    /Remove:/ {
+        sub(/Remove: /, "", $0)
+        remove_list = remove_list " " $0
+        total_removed++
+    }
+    END {
+        if (date != "") {
+            print date
+            if (install_list != "") print "  Installed: " green install_list reset
+            if (upgrade_list != "") print "  Upgraded: " yellow upgrade_list reset
+            if (remove_list != "") print "  Removed: " red remove_list reset
+        }
+        print "\nSummary:"
+        print "  Total Installed: " green total_installed reset
+        print "  Total Upgraded: " yellow total_upgraded reset
+        print "  Total Removed: " red total_removed reset
+    }' "$TEMP_FILE"
+}
+
+# Function to display help
+show_help() {
+    echo "Usage: apt-logger [OPTIONS]"
+    echo
+    echo "Options:"
+    echo "  -r, --report                  Generate a detailed report of installed, upgraded, and removed packages (default)."
+    echo "  -p, --package PACKAGE_NAME    Filter logs for a specific package."
+    echo "  -s, --start-month MONTH       Filter logs starting from this month (e.g., Jan)."
+    echo "      --start-year YEAR         Filter logs starting from this year (e.g., 2025)."
+    echo "  -e, --end-month MONTH         Filter logs up to this month (e.g., Dec)."
+    echo "      --end-year YEAR           Filter logs up to this year (e.g., 2025)."
+    echo "  -h, --help                    Display this help message."
+    echo
+    echo "Examples:"
+    echo "  ./apt-logger -s Jan --start-year 2025 -e Dec --end-year 2025"
+    echo "  ./apt-logger -p nginx"
+    echo "  ./apt-logger -r"
+}
+
+# Main function
+main() {
+    local start_month="" start_year="" end_month="" end_year="" package="" report=true
+    
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -r|--report) report=true ;;
+            -p|--package) package="$2"; shift ;;
+            -s|--start-month) start_month="$2"; shift ;;
+            --start-year) start_year="$2"; shift ;;
+            -e|--end-month) end_month="$2"; shift ;;
+            --end-year) end_year="$2"; shift ;;
+            -h|--help) show_help; exit 0 ;;
+            *) echo "Unknown option: $1"; show_help; exit 1 ;;
+        esac
+        shift
+    done
+
+    echo "Parsing apt logs..."
+    true > "$TEMP_FILE"  # Fix for SC2188
+
+    for log in "${LOG_FILES[@]}"; do
+        for file in $log; do  # Fix for SC2045 and SC2086
+            parse_logs "$file"
+        done
+    done
+
+    [[ -n "$start_month" && -n "$start_year" && -n "$end_month" && -n "$end_year" ]] && filter_by_month_year "$start_month" "$start_year" "$end_month" "$end_year"
+    [[ -n "$package" ]] && filter_by_package "$package"
+    
+    if [[ "$report" == true ]]; then
+        generate_report
+    fi
+
+    rm -f "$TEMP_FILE"
+}
+
+# Run the main function
+main "$@"
