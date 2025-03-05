@@ -4,21 +4,25 @@ MOVIE_DIR="$HOME/Videos/movies"
 RATINGS_DIR="$HOME/.local/share/rofi-mpv"
 RATINGS_FILE="$RATINGS_DIR/ratings"
 HISTORY_FILE="$RATINGS_DIR/history"
+FAVORITES_FILE="$RATINGS_DIR/favorites"
+RECENT_FILE="$RATINGS_DIR/recent"
 
-# Ensure the ratings and history directories/files exist
+# Ensure the directories/files exist
 mkdir -p "$RATINGS_DIR"
-touch "$RATINGS_FILE"
-touch "$HISTORY_FILE"
+touch "$RATINGS_FILE" "$HISTORY_FILE" "$FAVORITES_FILE" "$RECENT_FILE"
 
 # Function to list directories with ratings
 list_directories() {
     while IFS= read -r dir; do
         dir_name=$(basename "$dir")
         rating=$(grep -F "$dir_name" "$RATINGS_FILE" | cut -d':' -f2)
+        favorite=$(grep -F "$dir_name" "$FAVORITES_FILE")
+        prefix=""
+        [ -n "$favorite" ] && prefix="★ "
         if [ -n "$rating" ]; then
-            echo "$dir_name (⭐ $rating)"
+            echo "$prefix$dir_name (⭐ $rating)"
         else
-            echo "$dir_name"
+            echo "$prefix$dir_name"
         fi
     done < <(find "$MOVIE_DIR" -mindepth 1 -maxdepth 1 -type d | sort)
 }
@@ -32,10 +36,18 @@ log_history() {
     echo "$timestamp | $dir | Finished: $finished" >> "$HISTORY_FILE"
 }
 
+# Function to add to recent movies
+add_to_recent() {
+    local dir="$1"
+    grep -q -F "$dir" "$RECENT_FILE" && return
+    echo "$dir" >> "$RECENT_FILE"
+    tail -n 10 "$RECENT_FILE" > "$RECENT_FILE.tmp" && mv "$RECENT_FILE.tmp" "$RECENT_FILE"
+}
+
 # Function to rate a directory
 rate_directory() {
     local dir="$1"
-    rating=$(rofi -dmenu -p "Rate $dir (1-10):")
+    rating=$(rofi -dmenu -p "Rate $dir (1-10):" -lines 0)
     if [[ "$rating" =~ ^[1-9]$|^10$ ]]; then
         grep -vF "$dir:" "$RATINGS_FILE" > "$RATINGS_FILE.tmp" && mv "$RATINGS_FILE.tmp" "$RATINGS_FILE"
         echo "$dir:$rating" >> "$RATINGS_FILE"
@@ -45,73 +57,229 @@ rate_directory() {
     fi
 }
 
-# Function to view watch history in the terminal using fzf
+# Function to toggle favorite status
+toggle_favorite() {
+    local dir="$1"
+    dir_name=$(echo "$dir" | sed 's/ (⭐ [0-9]*)$//')
+    if grep -q -F "$dir_name" "$FAVORITES_FILE"; then
+        grep -vF "$dir_name" "$FAVORITES_FILE" > "$FAVORITES_FILE.tmp" && mv "$FAVORITES_FILE.tmp" "$FAVORITES_FILE"
+        notify-send "Removed $dir_name from favorites"
+    else
+        echo "$dir_name" >> "$FAVORITES_FILE"
+        notify-send "Added $dir_name to favorites"
+    fi
+}
+
+# Function to delete directories (preserving ratings and history)
+delete_directory() {
+    local dirs=("$@")
+    local confirm
+
+    confirm=$(echo -e "Yes\nNo" | rofi -dmenu -p "Delete ${#dirs[@]} selected directories? This cannot be undone:" -lines 2)
+    if [ "$confirm" = "Yes" ]; then
+        for dir in "${dirs[@]}"; do
+            dir_name=$(echo "$dir" | sed 's/ (⭐ [0-9]*)$//')
+            dir_path="$MOVIE_DIR/$dir_name"
+            if [ -d "$dir_path" ]; then
+                rm -rf "$dir_path" && notify-send "Deleted $dir_name" || notify-send "Failed to delete $dir_name"
+            else
+                notify-send "Directory not found: $dir_path"
+            fi
+        done
+    else
+        notify-send "Deletion of ${#dirs[@]} directories cancelled"
+    fi
+}
+
+# Function to view watch history
 view_history() {
     if [[ -s "$HISTORY_FILE" ]]; then
-        cat "$HISTORY_FILE" | fzf --preview "echo {}" --preview-window=down:5 --header="Press Enter to exit"
+        rofi -dmenu -p "Watch History (Enter to return):" -mesg "$(cat "$HISTORY_FILE")" -lines 0
     else
-        echo "No history available." | fzf --header="Press Enter to exit"
+        rofi -dmenu -p "Watch History (Enter to return):" -mesg "No history available." -lines 0
     fi
 }
 
 # Function to show most-watched statistics
 show_statistics() {
+    local stats=""
     if [[ -s "$HISTORY_FILE" ]]; then
-        echo "Most Watched Directories:"
-        awk -F' | ' '/Finished: Yes/ {count[$2]++} END {for (dir in count) print count[dir], dir}' "$HISTORY_FILE" | sort -nr
-        echo -e "\nHighest Rated Directories:"
-        awk -F':' '{print $2, $1}' "$RATINGS_FILE" | sort -nr | head -5
-        echo -e "\nTotal Hours Watched:"
-        grep -c "Finished: Yes" "$HISTORY_FILE"
+        stats+="Most Watched Directories:\n"
+        stats+="$(awk -F' | ' '/Finished: Yes/ {count[$2]++} END {for (dir in count) print count[dir], dir}' "$HISTORY_FILE" | sort -nr)\n\n"
+        stats+="Highest Rated Directories:\n"
+        stats+="$(awk -F':' '{print $2, $1}' "$RATINGS_FILE" | sort -nr | head -5)\n\n"
+        stats+="Total Movies Watched:\n"
+        stats+="$(grep -c "Finished: Yes" "$HISTORY_FILE")"
     else
-        echo "No statistics available."
-    fi | fzf --preview "echo {}" --preview-window=down:5 --header="Press Enter to exit"
+        stats="No statistics available."
+    fi
+    rofi -dmenu -p "Statistics (Enter to return):" -mesg "$stats" -lines 0
 }
 
-# Help function
-show_help() {
-    echo -e "Usage: ./script.sh [OPTIONS]\n"
-    echo "Options:"
-    echo "  --help                 Show this help message."
-    echo "  --view-history         View watch history in an interactive fzf menu."
-    echo "  --show-statistics      Display most-watched statistics interactively."
-    echo "  (No arguments)         List and play movies by default."
-}
+# Function to search movies
+search_movies() {
+    local query
+    query=$(rofi -dmenu -p "Search movies (Enter query):" -lines 0)
+    if [ -n "$query" ]; then
+        directories=$(list_directories | grep -i "$query" | rofi -dmenu -multi-select -p "Select matches (Shift+Enter for multi-select, Ctrl+X to delete):" -kb-custom-1 "Control+x")
+        rofi_exit_code=$?
 
-# Play movies by default
-play_movies() {
-    directory=$(list_directories | rofi -dmenu -p "Select a directory:")
-    if [ -n "$directory" ]; then
-        dir_path="$MOVIE_DIR/$directory"
-        if [ -d "$dir_path" ]; then
-            mpv "$dir_path"/*
-            finished=$(echo -e "Yes\nNo" | rofi -dmenu -p "Did you finish watching $directory?")
-            if [[ "$finished" == "Yes" ]]; then
-                log_history "$directory" "Yes"
-                rate_directory "$directory"
-            else
-                log_history "$directory" "No"
-                notify-send "No rating recorded for $directory."
-            fi
-        else
-            notify-send "Directory not found: $dir_path"
+        if [ -n "$directories" ]; then
+            mapfile -t dir_array <<< "$directories"
+            case $rofi_exit_code in
+                0)  # Play movies
+                    for directory in "${dir_array[@]}"; do
+                        dir_name=$(echo "$directory" | sed 's/ (⭐ [0-9]*)$//')
+                        dir_path="$MOVIE_DIR/$dir_name"
+                        if [ -d "$dir_path" ]; then
+                            mpv "$dir_path"/*
+                            finished=$(echo -e "Yes\nNo" | rofi -dmenu -p "Did you finish watching $dir_name?" -lines 2)
+                            if [[ "$finished" == "Yes" ]]; then
+                                log_history "$dir_name" "Yes"
+                                rate_directory "$dir_name"
+                            else
+                                log_history "$dir_name" "No"
+                                notify-send "No rating recorded for $dir_name."
+                            fi
+                            add_to_recent "$dir_name"
+                        else
+                            notify-send "Directory not found: $dir_path"
+                        fi
+                    done
+                    ;;
+                10)  # Delete movies
+                    delete_directory "${dir_array[@]}"
+                    ;;
+            esac
         fi
     fi
 }
 
-# Main logic
-case $1 in
-    -h|--help)
-        show_help
-        ;;
-    -v|--view-history)
-        view_history
-        ;;
-    -s|--show-statistics)
-        show_statistics
-        ;;
-    *)
-        play_movies
-        ;;
-esac
+# Function to show recent movies
+recent_movies() {
+    if [[ -s "$RECENT_FILE" ]]; then
+        directories=$(cat "$RECENT_FILE" | while IFS= read -r dir; do
+            rating=$(grep -F "$dir" "$RATINGS_FILE" | cut -d':' -f2)
+            favorite=$(grep -F "$dir" "$FAVORITES_FILE")
+            prefix=""
+            [ -n "$favorite" ] && prefix="★ "
+            if [ -n "$rating" ]; then
+                echo "$prefix$dir (⭐ $rating)"
+            else
+                echo "$prefix$dir"
+            fi
+        done | rofi -dmenu -multi-select -p "Recent movies (Shift+Enter for multi-select, Ctrl+X to delete):" -kb-custom-1 "Control+x")
+        rofi_exit_code=$?
 
+        if [ -n "$directories" ]; then
+            mapfile -t dir_array <<< "$directories"
+            case $rofi_exit_code in
+                0)  # Play movies
+                    for directory in "${dir_array[@]}"; do
+                        dir_name=$(echo "$directory" | sed 's/ (⭐ [0-9]*)$//')
+                        dir_path="$MOVIE_DIR/$dir_name"
+                        if [ -d "$dir_path" ]; then
+                            mpv "$dir_path"/*
+                            finished=$(echo -e "Yes\nNo" | rofi -dmenu -p "Did you finish watching $dir_name?" -lines 2)
+                            if [[ "$finished" == "Yes" ]]; then
+                                log_history "$dir_name" "Yes"
+                                rate_directory "$dir_name"
+                            else
+                                log_history "$dir_name" "No"
+                                notify-send "No rating recorded for $dir_name."
+                            fi
+                            add_to_recent "$dir_name"
+                        else
+                            notify-send "Directory not found: $dir_path"
+                        fi
+                    done
+                    ;;
+                10)  # Delete movies
+                    delete_directory "${dir_array[@]}"
+                    ;;
+            esac
+        fi
+    else
+        rofi -dmenu -p "Recent Movies (Enter to return):" -mesg "No recent movies available." -lines 0
+    fi
+}
+
+# Function to play movies with delete option
+play_movies() {
+    directories=$(list_directories | rofi -dmenu -multi-select -p "Select directories (Shift+Enter for multi-select, Ctrl+X to delete, Ctrl+s to toggle favorite):" \
+        -kb-custom-1 "Control+x" -kb-custom-2 "Control+s" -theme-str 'window { width: 80%; }')
+    rofi_exit_code=$?
+
+    if [ -n "$directories" ]; then
+        mapfile -t dir_array <<< "$directories"
+        case $rofi_exit_code in
+            0)  # Play movies
+                for directory in "${dir_array[@]}"; do
+                    dir_name=$(echo "$directory" | sed 's/ (⭐ [0-9]*)$//')
+                    dir_path="$MOVIE_DIR/$dir_name"
+                    if [ -d "$dir_path" ]; then
+                        mpv "$dir_path"/*
+                        finished=$(echo -e "Yes\nNo" | rofi -dmenu -p "Did you finish watching $dir_name?" -lines 2)
+                        if [[ "$finished" == "Yes" ]]; then
+                            log_history "$dir_name" "Yes"
+                            rate_directory "$dir_name"
+                        else
+                            log_history "$dir_name" "No"
+                            notify-send "No rating recorded for $dir_name."
+                        fi
+                        add_to_recent "$dir_name"
+                    else
+                        notify-send "Directory not found: $dir_path"
+                    fi
+                done
+                ;;
+            10)  # Delete movies
+                delete_directory "${dir_array[@]}"
+                ;;
+            11)  # Toggle favorite (Ctrl+F)
+                for directory in "${dir_array[@]}"; do
+                    toggle_favorite "$directory"
+                done
+                ;;
+        esac
+    fi
+}
+
+# Main loop with Rofi menu
+OPTIONS=("Play Movies" "Search Movies" "Recent Movies" "View History" "Show Statistics" "Exit")
+
+while true; do
+    SELECTED_OPTION=$(printf "%s\n" "${OPTIONS[@]}" | rofi -dmenu -i -p "Select action:" -format i)
+    rofi_exit_code=$?
+
+    if [ "$rofi_exit_code" -ne 0 ] || [ -z "$SELECTED_OPTION" ]; then
+        # Exit on Esc, Ctrl+C, or closing Rofi without selection
+        break
+    fi
+
+    case "$SELECTED_OPTION" in
+        0)  # Play Movies
+            play_movies
+            ;;
+        1)  # Search Movies
+            search_movies
+            ;;
+        2)  # Recent Movies
+            recent_movies
+            ;;
+        3)  # View History
+            view_history
+            ;;
+        4)  # Show Statistics
+            show_statistics
+            ;;
+        5)  # Exit
+            break
+            ;;
+        *)
+            notify-send "Invalid option selected"
+            ;;
+    esac
+done
+
+exit 0
