@@ -116,45 +116,6 @@ show_statistics() {
     rofi -dmenu -p "Statistics (Enter to return):" -mesg "$stats" -lines 0
 }
 
-# Function to search movies
-search_movies() {
-    local query
-    query=$(rofi -dmenu -p "Search movies (Enter query):" -lines 0)
-    if [ -n "$query" ]; then
-        directories=$(list_directories | grep -i "$query" | rofi -dmenu -multi-select -p "Select matches (Shift+Enter for multi-select, Ctrl+X to delete):" -kb-custom-1 "Control+x")
-        rofi_exit_code=$?
-
-        if [ -n "$directories" ]; then
-            mapfile -t dir_array <<< "$directories"
-            case $rofi_exit_code in
-                0)  # Play movies
-                    for directory in "${dir_array[@]}"; do
-                        dir_name=$(echo "$directory" | sed 's/ (⭐ [0-9]*)$//')
-                        dir_path="$MOVIE_DIR/$dir_name"
-                        if [ -d "$dir_path" ]; then
-                            mpv "$dir_path"/*
-                            finished=$(echo -e "Yes\nNo" | rofi -dmenu -p "Did you finish watching $dir_name?" -lines 2)
-                            if [[ "$finished" == "Yes" ]]; then
-                                log_history "$dir_name" "Yes"
-                                rate_directory "$dir_name"
-                            else
-                                log_history "$dir_name" "No"
-                                notify-send "No rating recorded for $dir_name."
-                            fi
-                            add_to_recent "$dir_name"
-                        else
-                            notify-send "Directory not found: $dir_path"
-                        fi
-                    done
-                    ;;
-                10)  # Delete movies
-                    delete_directory "${dir_array[@]}"
-                    ;;
-            esac
-        fi
-    fi
-}
-
 # Function to show recent movies
 recent_movies() {
     if [[ -s "$RECENT_FILE" ]]; then
@@ -179,7 +140,7 @@ recent_movies() {
                         dir_name=$(echo "$directory" | sed 's/ (⭐ [0-9]*)$//')
                         dir_path="$MOVIE_DIR/$dir_name"
                         if [ -d "$dir_path" ]; then
-                            mpv "$dir_path"/*
+                            mpv --fullscreen=yes "$dir_path"/*
                             finished=$(echo -e "Yes\nNo" | rofi -dmenu -p "Did you finish watching $dir_name?" -lines 2)
                             if [[ "$finished" == "Yes" ]]; then
                                 log_history "$dir_name" "Yes"
@@ -218,7 +179,7 @@ play_movies() {
                     dir_name=$(echo "$directory" | sed 's/ (⭐ [0-9]*)$//')
                     dir_path="$MOVIE_DIR/$dir_name"
                     if [ -d "$dir_path" ]; then
-                        mpv "$dir_path"/*
+                        mpv --fullscreen=yes "$dir_path"/*
                         finished=$(echo -e "Yes\nNo" | rofi -dmenu -p "Did you finish watching $dir_name?" -lines 2)
                         if [[ "$finished" == "Yes" ]]; then
                             log_history "$dir_name" "Yes"
@@ -246,7 +207,7 @@ play_movies() {
 }
 
 # Main loop with Rofi menu
-OPTIONS=("Play Movies" "Search Movies" "Recent Movies" "View History" "Show Statistics" "Exit")
+OPTIONS=("Play Movies"  "Recent Movies" "View History" "Show Statistics" "Exit")
 
 while true; do
     SELECTED_OPTION=$(printf "%s\n" "${OPTIONS[@]}" | rofi -dmenu -i -p "Select action:" -format i)
@@ -261,19 +222,16 @@ while true; do
         0)  # Play Movies
             play_movies
             ;;
-        1)  # Search Movies
-            search_movies
-            ;;
-        2)  # Recent Movies
+        1)  # Recent Movies
             recent_movies
             ;;
-        3)  # View History
+        2)  # View History
             view_history
             ;;
-        4)  # Show Statistics
+        3)  # Show Statistics
             show_statistics
             ;;
-        5)  # Exit
+        4)  # Exit
             break
             ;;
         *)

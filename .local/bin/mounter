@@ -1,0 +1,269 @@
+#!/bin/bash
+
+# USB Drive Management Script with fzf Loop
+# Enhanced with mount retry, integrity check, unmount confirmation, delete, list functions, and -f for format-only
+
+# Colors for output
+RED=$(tput setaf 1)
+GREEN=$(tput setaf 2)
+NC=$(tput sgr0) # No Color
+
+# Source directories for copying
+SOURCE_DIRS=("$HOME/Videos/movies" "$HOME/Downloads")
+LOG_FILE="$HOME/Local/share/mounter/usb_script.log"
+MOUNT_TIMEOUT=10  # Seconds to wait for mount before prompting
+
+# Function to log messages (always verbose)
+log_message() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
+    echo "$1"
+}
+
+# Function to display error and exit
+error_exit() {
+    log_message "${RED}ERROR: $1${NC}"
+    exit 1
+}
+
+# Cleanup function for unmounting on exit
+# shellcheck disable=SC2317  # Suppress unreachable code warning as trap ensures execution
+cleanup() {
+    if [ -n "$MOUNT_POINT" ] && mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
+        log_message "Cleaning up: Unmounting $DEVICE from $MOUNT_POINT"
+        sudo umount "$MOUNT_POINT" 2>/dev/null
+        sudo rmdir "$MOUNT_POINT" 2>/dev/null
+    fi
+}
+trap cleanup EXIT
+
+# Function to list USB devices for fzf
+list_usb() {
+    lsblk -o NAME,SIZE,TYPE,MOUNTPOINT -r | grep -E "disk|part" | grep -v "$(df / | tail -1 | awk '{print $1}')" | \
+        awk '{print $1 " (" $2 ", " $3 ", " $4 ")"}'
+}
+
+# Function to mount a USB drive with timeout and retry
+mount_usb() {
+    local device="$1"
+    local mount_point="/mnt/usb_$RANDOM"
+    local attempt=1 max_attempts=2
+
+    # Check if device exists
+    [ -b "$device" ] || error_exit "Device $device does not exist!"
+
+    # Check if already mounted
+    if mountpoint -q "$(lsblk -n -o MOUNTPOINT "$device")" 2>/dev/null; then
+        MOUNT_POINT=$(lsblk -n -o MOUNTPOINT "$device")
+        log_message "Device $device is already mounted at $MOUNT_POINT"
+        return
+    fi
+
+    # Create mount point
+    sudo mkdir -p "$mount_point" || error_exit "Failed to create mount point $mount_point"
+
+    while [ "$attempt" -le "$max_attempts" ]; do
+        log_message "Mounting $device (attempt $attempt/$max_attempts, timeout: ${MOUNT_TIMEOUT}s)..."
+        if timeout "$MOUNT_TIMEOUT"s sudo mount "$device" "$mount_point" 2>/dev/null; then
+            MOUNT_POINT="$mount_point"
+            log_message "${GREEN}Mounted $device at $MOUNT_POINT${NC}"
+            return
+        else
+            log_message "${RED}Mounting $device failed or timed out${NC}"
+            ((attempt++))
+            [ "$attempt" -le "$max_attempts" ] && read -r -p "Retry mounting? (yes/no): " retry_choice
+            [ "$retry_choice" != "yes" ] && break
+        fi
+    done
+
+    log_message "Mounting failed after $max_attempts attempts."
+    read -r -p "Format $device to resolve? (yes/no): " format_choice
+    if [ "$format_choice" = "yes" ]; then
+        format_usb "$device"
+        [ -z "$MOUNT_POINT" ] || ! mountpoint -q "$MOUNT_POINT" && error_exit "Failed to mount $device even after formatting!"
+    else
+        error_exit "Mounting failed and formatting skipped."
+    fi
+}
+
+# Function to unmount a USB drive with confirmation
+unmount_usb() {
+    local device="$1"
+    [ -z "$MOUNT_POINT" ] || ! mountpoint -q "$MOUNT_POINT" 2>/dev/null && { log_message "Device $device is not mounted"; return; }
+
+    local item_count space_used
+    item_count=$(sudo ls -A "$MOUNT_POINT" | wc -l)
+    space_used=$(sudo du -sh "$MOUNT_POINT" | cut -f1)
+    
+    log_message "USB Contents Summary: $item_count items, $space_used used"
+    read -r -p "Unmount $device from $MOUNT_POINT? (yes/no): " unmount_choice
+    if [ "$unmount_choice" = "yes" ]; then
+        sudo umount "$MOUNT_POINT" || error_exit "Failed to unmount $device"
+        sudo rmdir "$MOUNT_POINT" 2>/dev/null
+        log_message "${GREEN}Unmounted $device${NC}"
+    else
+        log_message "Unmount skipped."
+    fi
+}
+
+# Function to format a USB drive
+format_usb() {
+    local device="$1"
+    local fs_type
+    fs_type=$(echo -e "vfat\next4\nntfs" | fzf --prompt="Select filesystem type: " --height=10) || { log_message "No filesystem selected."; return 1; }
+
+    log_message "${RED}WARNING: Formatting $device will erase all data!${NC}"
+    read -r -p "Confirm? (yes/no): " confirm
+    [ "$confirm" != "yes" ] && { log_message "Format cancelled."; return 1; }
+
+    unmount_usb "$device"
+    case "$fs_type" in
+        "vfat") sudo mkfs.vfat -F 32 "$device" || error_exit "Failed to format $device as FAT32" ;;
+        "ext4") sudo mkfs.ext4 "$device" || error_exit "Failed to format $device as ext4" ;;
+        "ntfs") sudo mkfs.ntfs -Q "$device" || error_exit "Failed to format $device as NTFS" ;;
+        *) error_exit "Unsupported filesystem: $fs_type" ;;
+    esac
+    log_message "${GREEN}Formatted $device as $fs_type${NC}"
+
+    if [ "$FORMAT_ONLY" != "true" ]; then
+        mount_usb "$device"
+    fi
+}
+
+# Function to receive data from USB
+receive_data() {
+    local device="$1"
+    [ -z "$MOUNT_POINT" ] || ! mountpoint -q "$MOUNT_POINT" && error_exit "USB drive is not mounted!"
+
+    local files
+    files=$(sudo find "$MOUNT_POINT" -maxdepth 1 -type f -o -type d | grep -v "^$MOUNT_POINT$" | \
+        fzf --multi --prompt="Select files/directories to receive (TAB for multiple, Enter to confirm): " --height=20)
+    [ -z "$files" ] && { log_message "No files selected."; return; }
+
+    mapfile -t file_array <<< "$files"
+    log_message "Selected ${#file_array[@]} items for receiving:"
+    printf '%s\n' "${file_array[@]}"
+    read -r -p "Confirm copy to $HOME/Downloads? (yes/no): " confirm
+    [ "$confirm" != "yes" ] && { log_message "Receive cancelled."; return; }
+
+    log_message "Receiving ${#file_array[@]} items to $HOME/Downloads..."
+    sudo -n rsync -a --progress "${file_array[@]}" "$HOME/Downloads" || error_exit "Receive failed!"
+    log_message "${GREEN}Received ${#file_array[@]} items${NC}"
+}
+
+# Function to send data to USB
+send_data() {
+    local device="$1"
+    [ -z "$MOUNT_POINT" ] || ! mountpoint -q "$MOUNT_POINT" && error_exit "USB drive is not mounted!"
+
+    for dir in "${SOURCE_DIRS[@]}"; do [ ! -d "$dir" ] && error_exit "Source directory $dir does not exist!"; done
+    local free_space
+    free_space=$(df -h "$MOUNT_POINT" | tail -1 | awk '{print $4}')
+    log_message "Free space on USB: $free_space"
+
+    local files
+    files=$(find "${SOURCE_DIRS[@]}" -maxdepth 1 -type f -o -type d | grep -v "^${SOURCE_DIRS[0]}$" | grep -v "^${SOURCE_DIRS[1]}$" | \
+        sed "s|$HOME/||" | fzf --multi --prompt="Select files/directories to send (TAB for multiple, Enter to confirm): " --height=20)
+    [ -z "$files" ] && { log_message "No files selected."; return; }
+
+    mapfile -t file_array <<< "$files"
+    for i in "${!file_array[@]}"; do
+        if [[ "${file_array[i]}" =~ ^Videos/ ]]; then file_array[i]="$HOME/${file_array[i]}"
+        elif [[ "${file_array[i]}" =~ ^Downloads/ ]]; then file_array[i]="$HOME/${file_array[i]}"
+        fi
+    done
+
+    log_message "Selected ${#file_array[@]} items for sending:"
+    printf '%s\n' "${file_array[@]}"
+    read -r -p "Confirm send to USB? (yes/no): " confirm
+    [ "$confirm" != "yes" ] && { log_message "Send cancelled."; return; }
+
+    log_message "Sending ${#file_array[@]} items to $MOUNT_POINT..."
+    sudo -n rsync -a --progress "${file_array[@]}" "$MOUNT_POINT" || error_exit "Send failed!"
+    log_message "${GREEN}Sent ${#file_array[@]} items${NC}"
+
+    log_message "Verifying integrity..."
+    for file in "${file_array[@]}"; do
+        local base_name=${file##*/} src_checksum dest_checksum
+        src_checksum=$(sha256sum "$file" | awk '{print $1}')
+        dest_checksum=$(sha256sum "$MOUNT_POINT/$base_name" | awk '{print $1}')
+        [ "$src_checksum" = "$dest_checksum" ] || log_message "${RED}Integrity check failed for $base_name!${NC}"
+    done
+    log_message "Integrity check complete."
+}
+
+# Function to delete data from USB
+delete_data() {
+    local device="$1"
+    [ -z "$MOUNT_POINT" ] || ! mountpoint -q "$MOUNT_POINT" && error_exit "USB drive is not mounted!"
+
+    local files
+    files=$(sudo find "$MOUNT_POINT" -maxdepth 1 -type f -o -type d | grep -v "^$MOUNT_POINT$" | \
+        fzf --multi --prompt="Select files/directories to delete (TAB for multiple, Enter to confirm): " --height=20)
+    [ -z "$files" ] && { log_message "No files selected."; return; }
+
+    mapfile -t file_array <<< "$files"
+    log_message "Selected ${#file_array[@]} items for deletion:"
+    printf '%s\n' "${file_array[@]}"
+    read -r -p "Confirm deletion? (yes/no): " confirm
+    [ "$confirm" != "yes" ] && { log_message "Deletion cancelled."; return; }
+
+    log_message "Deleting ${#file_array[@]} items from $MOUNT_POINT..."
+    sudo -n rm -rf "${file_array[@]}" || error_exit "Deletion failed!"
+    log_message "${GREEN}Deleted ${#file_array[@]} items${NC}"
+}
+
+# Function to list files on USB with previews
+list_data() {
+    local device="$1"
+    [ -z "$MOUNT_POINT" ] || ! mountpoint -q "$MOUNT_POINT" && error_exit "USB drive is not mounted!"
+
+    local preview_cmd
+    preview_cmd=$(command -v batcat || command -v bat || echo "cat")
+    command -v eza >/dev/null || error_exit "eza required for directory previews"
+
+    sudo find "$MOUNT_POINT" -maxdepth 1 -type f -o -type d | grep -v "^$MOUNT_POINT$" | \
+        fzf --preview "if [ -f {} ]; then sudo $preview_cmd {}; else sudo eza -la --tree --level=2 {}; fi" \
+            --preview-window=right:50% --prompt="Files on $DEVICE (Enter to return): " --height=20
+    log_message "Listed files on $DEVICE"
+}
+
+# Main script
+log_message "USB Drive Management Script with fzf"
+log_message "------------------------------------"
+
+for cmd in lsblk mount umount mkfs.vfat rsync fzf find ls du df timeout sha256sum eza; do
+    command -v "$cmd" >/dev/null || error_exit "$cmd required"
+done
+
+[ "$EUID" -ne 0 ] && log_message "Some operations require sudo privileges."
+
+FORMAT_ONLY=false
+[ "$1" = "-f" ] && FORMAT_ONLY=true && log_message "Format-only mode enabled"
+
+DEVICE_INFO=$(list_usb | fzf --prompt="Select USB device: " --height=20) || error_exit "No device selected!"
+DEVICE="/dev/$(echo "$DEVICE_INFO" | awk '{print $1}')"
+
+if [ "$FORMAT_ONLY" = "true" ]; then
+    log_message "Formatting USB drive (format-only mode)"
+    format_usb "$DEVICE"
+else
+    log_message "Mounting USB device $DEVICE"
+    mount_usb "$DEVICE"  # Must succeed to continue
+
+    # fzf loop for operations
+    while true; do
+        action=$(echo -e "Format\nReceive Data\nSend Data\nDelete Data\nList Data\nUnmount and Exit" | \
+            fzf --prompt="Select action for $DEVICE: " --height=10) || break
+        case "$action" in
+            "Format") format_usb "$DEVICE" ;;
+            "Receive Data") receive_data "$DEVICE" ;;
+            "Send Data") send_data "$DEVICE" ;;
+            "Delete Data") delete_data "$DEVICE" ;;
+            "List Data") list_data "$DEVICE" ;;
+            "Unmount and Exit") unmount_usb "$DEVICE"; break ;;
+            *) log_message "Invalid action: $action" ;;
+        esac
+    done
+fi
+
+exit 0

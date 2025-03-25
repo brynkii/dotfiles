@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -euo pipefail
+
 # Default directory containing books
 BOOK_DIR="$HOME/Documents/books"
 
@@ -164,7 +166,7 @@ while true; do
 
     case "$SELECTED_OPTION" in
         0) # Select a book
-            if ! SELECTED_INDEX=$(printf "%s\n" "${BOOK_NAMES[@]}" | rofi -dmenu -i -p "Select a book:" -format i); then
+            if ! SELECTED_INDEX=$(printf "%s\n" "${BOOK_NAMES[@]}" | rofi -dmenu -i -p "Select a book:" -format i -theme-str 'window { width: 80%; }'); then
                 printf "Error: rofi failed to run. Is it installed?\n"
                 exit 1
             fi
