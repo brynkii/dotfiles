@@ -10,7 +10,7 @@ NC=$(tput sgr0) # No Color
 
 # Source directories for copying
 SOURCE_DIRS=("$HOME/Videos/movies" "$HOME/Downloads")
-LOG_FILE="$HOME/Local/share/mounter/usb_script.log"
+LOG_FILE="$HOME/.local/share/mounter/usb_script.log"
 MOUNT_TIMEOUT=10  # Seconds to wait for mount before prompting
 
 # Function to log messages (always verbose)
