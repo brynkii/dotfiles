@@ -12,12 +12,12 @@ vim.opt.rtp:prepend(lazypath)
 vim.g.mapleader = ' '
 
 -- Initialize lazy with dynamic loading of anything in the plugins directory
-require('lazy').setup({import = 'plugins'}, {
+require('lazy').setup({ import = 'plugins' }, {
   change_detection = {
     enabled = true, -- automatically check for config file changes and reload the ui
     notify = false, -- turn off notifications whenever plugin changes are made
   },
-    ui = {
+  ui = {
     -- If you are using a Nerd Font: set icons to an empty table which will use the
     -- default lazy.nvim defined Nerd Font icons, otherwise define a unicode icons table
     icons = vim.g.have_nerd_font and {} or {
@@ -36,10 +36,10 @@ require('lazy').setup({import = 'plugins'}, {
       lazy = '💤 ',
     },
   },
-
 })
 
 -- These modules are not loaded by lazy
 require 'core.options'
 require 'core.keymaps'
 require 'user'
+require 'colorscheme'
