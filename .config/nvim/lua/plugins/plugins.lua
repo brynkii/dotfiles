@@ -23,9 +23,4 @@ return {
       -- refer to the configuration section below
     },
   },
-  {
-    'MeanderingProgrammer/render-markdown.nvim',
-    opts = {},
-    dependencies = { 'nvim-treesitter/nvim-treesitter', 'echasnovski/mini.icons' },
-  },
 }

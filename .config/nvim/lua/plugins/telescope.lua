@@ -19,6 +19,7 @@ return { -- Fuzzy Finder (files, lsp, etc)
       end,
     },
     { 'nvim-telescope/telescope-ui-select.nvim', enabled = vim.g.have_nerd_font },
+    'andrew-george/telescope-themes',
 
     -- Useful for getting pretty icons, but requires special font.
     --  If you already have a Nerd Font, or terminal set up with fallback fonts
@@ -51,11 +52,12 @@ return { -- Fuzzy Finder (files, lsp, etc)
       -- You can put your default mappings / updates / etc. in here
       --  All the info you're looking for is in `:help telescope.setup()`
       --
-      -- defaults = {
-      --   mappings = {
-      --     i = { ['<c-enter>'] = 'to_fuzzy_refine' },
-      --   },
-      -- },
+      defaults = {
+        path_display = { 'smart' },
+        mappings = {
+          i = { ['<c-enter>'] = 'to_fuzzy_refine' },
+        },
+      },
       pickers = {
         find_files = {
           file_ignore_patterns = { 'node_modules', '.git', '.venv' },
@@ -71,12 +73,21 @@ return { -- Fuzzy Finder (files, lsp, etc)
         ['ui-select'] = {
           require('telescope.themes').get_dropdown(),
         },
+        themes = {
+          enable_previewer = true,
+          enable_live_preview = true,
+          persist = {
+            enabled = true,
+            path = vim.fn.stdpath 'config' .. '/lua/colorscheme.lua',
+          },
+        },
       },
     }
 
     -- Enable telescope extensions, if they are installed
     pcall(require('telescope').load_extension, 'fzf')
     pcall(require('telescope').load_extension, 'ui-select')
+    pcall(require('telescope').load_extension, 'themes')
 
     -- See `:help telescope.builtin`
     local builtin = require 'telescope.builtin'
@@ -119,5 +130,6 @@ return { -- Fuzzy Finder (files, lsp, etc)
     vim.keymap.set('n', '<leader>fn', function()
       builtin.find_files { cwd = vim.fn.stdpath 'config' }
     end, { desc = '[F]ind [N]eovim files' })
+    vim.keymap.set('n', '<leader>ft', '<cmd>Telescope themes<CR>', { noremap = true, silent = true, desc = 'Theme Switcher' })
   end,
 }
