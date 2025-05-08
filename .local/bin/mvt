@@ -1,6 +1,5 @@
 #!/bin/bash
-# Move files between tmux panes
-# Select files from the current pane and move them to the target pane
+# Move files between tmux panes with support for spaces, previews, and color listing
 
 # Get the active pane and target pane
 src_pane=$(tmux display-message -p "#D")
@@ -12,23 +11,56 @@ if [ -z "$target_pane" ]; then
     exit 1
 fi
 
+# Ensure target pane is still valid
+if ! tmux list-panes -F "#{pane_id}" | grep -q "$target_pane"; then
+    echo "Target pane no longer exists. Exiting."
+    exit 1
+fi
+
 # Get the working directories of both panes
 src_dir=$(tmux display-message -p -F "#{pane_current_path}")
 dest_dir=$(tmux display-message -p -t "$target_pane" -F "#{pane_current_path}")
 
-# Select files to move
+# Change to the source directory
 cd "$src_dir" || exit
-selected_files=$(ls -1A | fzf --multi --prompt="Select files to move: ")
+
+# Function to get list of files using eza, ls, or find
+get_file_list() {
+    if command -v eza &>/dev/null; then
+        eza --color=always --all --oneline
+    elif ls --color=always &>/dev/null; then
+        ls --color=always -1A
+    else
+        find . -maxdepth 1 -mindepth 1 -printf '%P\n'
+    fi
+}
+
+# Select files to move with preview and color support
+IFS=$'\n' read -r -d '' -a selected_files < <(
+    get_file_list | \
+    fzf --multi --ansi --prompt="Select files to move: " \
+        --preview='file --mime {}' \
+        --preview-window=down:3:wrap --exit-0 | \
+    awk '{print $0}' && printf '\0'
+)
 
 # Ensure files are selected
-if [ -z "$selected_files" ]; then
+if [ ${#selected_files[@]} -eq 0 ]; then
     echo "No files selected. Exiting."
     exit 1
 fi
 
-# Move files to the target directory
-for file in $selected_files; do
-    mv "$src_dir/$file" "$dest_dir/"
+# Move files to the target directory with conflict handling
+for file in "${selected_files[@]}"; do
+    src_file="$src_dir/$file"
+    dest_file="$dest_dir/$file"
+
+    if [ -e "$dest_file" ]; then
+        read -rp "'$file' already exists in target. Overwrite? [y/N]: " answer
+        [[ "$answer" != [Yy] ]] && echo "Skipping $file" && continue
+    fi
+
+    mv -- "$src_file" "$dest_file"
 done
 
 echo "Files moved to $dest_dir"
