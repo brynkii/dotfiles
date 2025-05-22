@@ -1,0 +1,124 @@
+#!/bin/bash
+
+# Logging function with log levels
+log() {
+    local level="$1"
+    local message="$2"
+    local timestamp
+    timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+    echo "$timestamp [$level] $message"
+}
+
+# Usage function with help details
+usage() {
+    cat <<EOF
+Usage: $0 <project_name> [options]
+
+Options:
+  --help          Show this help message
+  --git           Initialize a git repository for the project
+EOF
+    return 0
+}
+
+# Check if help is requested
+if [[ "$1" == "--help" ]]; then
+    usage
+    exit 0
+fi
+
+pname=$1
+pdir="./${pname}"
+tdir=$HOME/.local/templates
+
+# Check if project name is provided
+if [ -z "$pname" ]; then
+    log "ERROR" "Project name is required."
+    usage
+    exit 1
+elif ! [ -d "$tdir" ]; then
+    log "ERROR" "Unable to find template dir: $tdir"
+    exit 2
+elif [ -d "$pdir" ]; then
+    log "ERROR" "Project dir already exists: $pdir"
+    exit 3
+fi
+
+cur="$PWD"
+cd "$tdir" || { log "ERROR" "Failed to change to template directory"; exit 4; }
+
+# Template selection via fzf, fall back to select if fzf isn't available
+log "INFO" "Please select a template"
+if command -v fzf &> /dev/null; then
+    template=$(find . -maxdepth 1 -type d | fzf --prompt="Select Template: " --exit-0)
+else
+    select template in */; do
+        break
+    done
+fi
+
+if [ -z "$template" ]; then
+    log "ERROR" "No template selected"
+    exit 5
+fi
+
+# Preview template before copying
+log "INFO" "Previewing template structure"
+find "$template" -type f -exec echo "File: {}" \;
+echo "Are you sure you want to create the project with this template? (y/n)"
+read -r confirm
+if [[ "$confirm" != "y" ]]; then
+    log "INFO" "Template creation aborted"
+    exit 6
+fi
+
+# Interactive configuration for template values
+log "INFO" "Interactive Configuration"
+echo "Enter project description:"
+read -r project_desc
+echo "Enter author name:"
+read -r author_name
+
+# Substitute PROJECTNAME, PROJECTDESC, AUTHOR in the template
+cd "$cur" || { log "ERROR" "Failed to change back to original directory"; exit 7; }
+cp -R "${tdir}/${template}" "$pdir"
+
+for x in "$pdir"/*; do
+    new=$(sed "s,PROJECTNAME,$pname,g; s,PROJECTDESC,$project_desc,g; s,AUTHOR,$author_name,g" <<< "$x")
+    if [ "$x" = "$new" ]; then
+        sed "s,PROJECTNAME,$pname,g; s,PROJECTDESC,$project_desc,g; s,AUTHOR,$author_name,g" < "$x" > temp
+        mv -f temp "$x"
+    else
+        sed "s,PROJECTNAME,$pname,g; s,PROJECTDESC,$project_desc,g; s,AUTHOR,$author_name,g" < "$x" > "$new"
+        if [ -e "$new" ]; then
+            rm -f "$x"
+        fi
+    fi
+done
+
+# Create or update the README.md with project details
+readme="$pdir/README.md"
+log "INFO" "Creating or updating README.md"
+cat <<EOF > "$readme"
+# $pname
+
+**Project Description**: $project_desc
+
+**Author**: $author_name
+EOF
+
+# Git initialization (optional)
+echo "Do you want to initialize a Git repository? (y/n)"
+read -r git_response
+if [[ "$git_response" == "y" ]]; then
+    log "INFO" "Initializing Git repository"
+    cd "$pdir" || { log "ERROR" "Failed to change to project directory"; exit 8; }
+    git init
+    git add .
+    git commit -m "Initial commit"
+    log "INFO" "Git repository initialized"
+else
+    log "INFO" "Git initialization skipped"
+fi
+
+log "INFO" "Project setup completed successfully"
