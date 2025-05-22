@@ -3,12 +3,31 @@
 	name = brynkii
 [init]
 	defaultBranch = main
+[status]
+	branch = true
+	showStash = true
+	showUntrackedFiles = all
+[branch]
+	sort = -commiterdate
+[tag]
+	sort = -taggerdate
 [color]
 	ui = auto
+[push]
+	autoSetupRemote = true
+	default = current
+	followTags = true
 [pull]
+	default = current
 	rebase = false
+[rebase]
+	autoStash = true
+	missingCommitsCheck = warn
 [core]
 	editor = nvim
+	compression = 9
+	whitespace = error
+	preloadindex = true
 [alias]
 	lg = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr)%Creset' --abbrev-commit --date=relative
 [http]

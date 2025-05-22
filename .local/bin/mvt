@@ -1,67 +1,75 @@
 #!/bin/bash
-# Move files between tmux panes with support for spaces, previews, and color listing
+# Move or copy files between tmux panes with color preview and full filename safety
 
-# Get the active pane and target pane
+set -euo pipefail
+
+# Get active and target tmux panes
 src_pane=$(tmux display-message -p "#D")
 target_pane=$(tmux list-panes -F "#{pane_id}" | grep -v "${src_pane}" | fzf --prompt="Select target pane: ")
 
-# Ensure a target pane is selected
-if [ -z "$target_pane" ]; then
-    echo "No target pane selected. Exiting."
+if [ -z "$target_pane" ] || ! tmux list-panes -F "#{pane_id}" | grep -q "$target_pane"; then
+    echo "No valid target pane selected. Exiting."
     exit 1
 fi
 
-# Ensure target pane is still valid
-if ! tmux list-panes -F "#{pane_id}" | grep -q "$target_pane"; then
-    echo "Target pane no longer exists. Exiting."
-    exit 1
-fi
-
-# Get the working directories of both panes
+# Get source and target directories
 src_dir=$(tmux display-message -p -F "#{pane_current_path}")
 dest_dir=$(tmux display-message -p -t "$target_pane" -F "#{pane_current_path}")
+cd "$src_dir" || exit 1
 
-# Change to the source directory
-cd "$src_dir" || exit
+# Ask user to choose move or copy
+action=$(printf "Move\nCopy" | fzf --prompt="Action: ")
+if [ -z "$action" ]; then
+    echo "No action selected. Exiting."
+    exit 1
+fi
 
-# Function to get list of files using eza, ls, or find
-get_file_list() {
+# Determine command to use
+cmd="mv"
+[ "$action" = "Copy" ] && cmd="cp -r"
+
+# Function for colorized file preview
+color_preview_cmd() {
     if command -v eza &>/dev/null; then
-        eza --color=always --all --oneline
+        echo 'eza --color=always --all --oneline'
     elif ls --color=always &>/dev/null; then
-        ls --color=always -1A
+        echo 'ls --color=always -1A'
     else
-        find . -maxdepth 1 -mindepth 1 -printf '%P\n'
+        echo 'find . -maxdepth 1 -mindepth 1 -printf "%f\n"'
     fi
 }
 
-# Select files to move with preview and color support
+# Generate preview command string (safe eval'd in fzf)
+preview_command=$(color_preview_cmd)
+
+# Use find -print0 to handle any filenames
 IFS=$'\n' read -r -d '' -a selected_files < <(
-    get_file_list | \
-    fzf --multi --ansi --prompt="Select files to move: " \
-        --preview='file --mime {}' \
-        --preview-window=down:3:wrap --exit-0 | \
-    awk '{print $0}' && printf '\0'
+    find . -mindepth 1 -maxdepth 1 -print0 | \
+    fzf --multi --read0 --prompt="Select files to $action: " \
+        --preview='file --mime "{}"' \
+        --preview-window=down:3:wrap \
+        --ansi --bind "ctrl-l:toggle-preview" --exit-0 | \
+    tr '\0' '\n' && printf '\0'
 )
 
-# Ensure files are selected
+# If nothing selected
 if [ ${#selected_files[@]} -eq 0 ]; then
     echo "No files selected. Exiting."
     exit 1
 fi
 
-# Move files to the target directory with conflict handling
-for file in "${selected_files[@]}"; do
-    src_file="$src_dir/$file"
-    dest_file="$dest_dir/$file"
+# Perform the copy or move
+for rel_file in "${selected_files[@]}"; do
+    clean_file="${rel_file#./}"
+    src_path="$src_dir/$clean_file"
+    dest_path="$dest_dir/$clean_file"
 
-    if [ -e "$dest_file" ]; then
-        read -rp "'$file' already exists in target. Overwrite? [y/N]: " answer
-        [[ "$answer" != [Yy] ]] && echo "Skipping $file" && continue
+    if [ -e "$dest_path" ]; then
+        read -rp "'$clean_file' exists in destination. Overwrite? [y/N]: " confirm
+        [[ "$confirm" != [Yy] ]] && echo "Skipping $clean_file" && continue
     fi
 
-    mv -- "$src_file" "$dest_file"
+    $cmd -- "$src_path" "$dest_path"
 done
 
-echo "Files moved to $dest_dir"
-
+echo "Files ${action,,}ed to $dest_dir"
