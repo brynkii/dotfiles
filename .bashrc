@@ -555,9 +555,12 @@ if [ -f /usr/share/bash-completion/bash_completion ]; then
 	. /usr/share/bash-completion/bash_completion
 elif [ -f /etc/bash_completion ]; then
 	. /etc/bash_completion
-elif [ -f "$HOME/.local/share/bash_completion" ]; then 
-	. "$HOME/.local/share/bash_completion"
 fi
+
+# Load custom completions
+for f in ~/.local/share/bash_completions/*; do
+  [[ -f $f ]] && source "$f"
+done
 # remember last arg will be first in path
 pathprepend \
 	"$HOME/.local/bin" \

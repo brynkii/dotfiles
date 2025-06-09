@@ -139,20 +139,19 @@ case "$1" in
 esac
 
 # If a valid directory is selected, write to the temp file and append to history
-if [[ -n "$SELECTED_DIR" ]]; then
-    # Resolve the selected directory to an absolute path
-    ABS_DIR=$(realpath "$SELECTED_DIR" 2>/dev/null)
-
-    # Check if it is a valid, readable directory
-    if [[ -d "$ABS_DIR" && -r "$ABS_DIR" ]]; then
-        echo "$ABS_DIR" > "$TEMP_FILE"
-        echo "$ABS_DIR" >> "$HIST_FILE"
-    else
-        echo "Invalid or inaccessible directory: $SELECTED_DIR"
-        > "$TEMP_FILE"
-    fi
+# If it's already absolute, use it as-is
+if [[ "$SELECTED_DIR" = /* ]]; then
+    ABS_DIR="$SELECTED_DIR"
 else
-    echo "No directory selected."
+    ABS_DIR="$(pwd)/$SELECTED_DIR"
+fi
+
+# Confirm it's a valid directory
+if [[ -d "$ABS_DIR" && -r "$ABS_DIR" ]]; then
+    echo "$ABS_DIR" > "$TEMP_FILE"
+    echo "$ABS_DIR" >> "$HIST_FILE"
+else
+    echo "Invalid or inaccessible directory: $SELECTED_DIR"
     > "$TEMP_FILE"
 fi
 
