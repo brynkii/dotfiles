@@ -219,6 +219,7 @@ alias clear='printf "\e[H\e[2J"'
 alias c='printf "\e[H\e[2J"'
 alias coin="xclip '(yes|no)'"
 alias more="less"
+alias dircount='echo "$(find . -mindepth 1 -maxdepth 1 -type d | wc -l) dirs in $(pwd)"'
 
 # aliases for multiple directory listing commands
 if [ -n "$(command -v eza 2>&1)" ]; then
@@ -253,13 +254,6 @@ fi
 
 # show all logs in /var/log 
 alias logs="sudo find /var/log -type f -exec file {} \; | grep 'text' | cut -d' ' -f1 | sed -e's/:$//g' | grep -v '[0-9]$' | xargs tail -f"
-
-# Alias's to show disk space and space used in a folder
-alias folders='du -h --max-depth=1 2> /dev/null | awk \
-  "/[0-9]+G/ {printf \"\033[31m%s\033[0m\n\", \$0} \
-   /[0-9]+M/ {printf \"\033[32m%s\033[0m\n\", \$0} \
-   /[0-9]+K/ {printf \"\033[97m%s\033[0m\n\", \$0} \
-   !/[0-9]+[GMK]/ {print \$0}"'
 
 alias folderssort='find . -maxdepth 1 -type d -print0 | xargs -0 du -sk | sort -rn'
 alias tree='tree -CAhF --dirsfirst'
@@ -338,7 +332,7 @@ mvg() {
 # Create and go to the directory
 mkdirg() {
 	mkdir -p "$1"
-	cd "$1"
+	cd "$1" || exit
 }
 
 # Goes up a specified number of directories  (i.e. up 4)
@@ -442,6 +436,16 @@ ver() {
 	esac
 }
 
+# show the amount of memory used per folder.
+folders() {
+  du -h --max-depth=1 2>/dev/null | awk '
+    /[0-9]+G/ {printf "\033[31m%s\033[0m\n", $0}
+    /[0-9]+M/ {printf "\033[32m%s\033[0m\n", $0}
+    /[0-9]+K/ {printf "\033[97m%s\033[0m\n", $0}
+    !/[0-9]+[GMK]/ {print $0}'
+}
+
+
 # Show current network information
 netinfo() {
 	echo "--------------- Network Information ---------------"
@@ -490,12 +494,24 @@ hwinfo() {
 }
 
 # Trim leading and trailing spaces (for scripts)
- trim() {
-   local var=$*
-   var="${var#"${var%%[![:space:]]*}"}" # remove leading whitespace char
-   var="${var%"${var##*[![:space:]]}"}" # remove trailing whitespace cha
-   echo -n "$var"\n
+trim() {
+  local file="$1"
+  [[ ! -f "$file" ]] && { echo "File not found: $file"; return 1; }
+
+  local tmpfile
+  tmpfile=$(mktemp)
+
+  while IFS= read -r line; do
+    # Remove only leading/trailing spaces (not tabs)
+    line="${line#"${line%%[! ]*}"}"   # Trim leading spaces
+    line="${line%"${line##*[! ]}"}"   # Trim trailing spaces
+    printf "%s\n" "$line"
+  done < "$file" > "$tmpfile"
+
+  mv "$tmpfile" "$file"
+  echo "Trimmed file (spaces only, tabs preserved): $file"
 }
+
 
 
 # ------------- source external dependencies / completion ------------
@@ -589,12 +605,6 @@ if [[ $- == *i* ]]; then
     # Bind Ctrl+f to insert 'zi' followed by a newline
     bind '"\C-f":"zi\n"'
 fi
-
-# installing Node
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
-[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
-. "$HOME/.cargo/env"
 
 
 # Configuring asdf
