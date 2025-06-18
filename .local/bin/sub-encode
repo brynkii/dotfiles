@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+show_help() {
+  cat <<EOF
+Usage: $(basename "$0") [OPTIONS] video_file
+
+Options:
+  -s, --subtitle FILE    Use this subtitle file (.srt)
+  -o, --output FILE      Output filename (default: auto-generated)
+  -l, --lang CODE        Language code for subtitles (default: und)
+  -t, --title TITLE      Subtitle title metadata (optional)
+  -h, --help             Show this help message and exit
+
+The script will prompt for hard or soft subtitle encoding.
+If no subtitle is provided, it attempts to auto-match or download one.
+EOF
+}
+
+# --- Defaults ---
+SUBS=""
+OUT=""
+LANG="und"
+TITLE=""
+
+# --- Parse Args ---
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -s|--subtitle)
+      SUBS="$2"
+      shift 2;;
+    -o|--output)
+      OUT="$2"
+      shift 2;;
+    -l|--lang)
+      LANG="$2"
+      shift 2;;
+    -t|--title)
+      TITLE="$2"
+      shift 2;;
+    -h|--help)
+      show_help
+      exit 0;;
+    --)
+      shift; break;;
+    -*|--*)
+      echo "Unknown option $1"; exit 1;;
+    *)
+      POSITIONAL+=("$1"); shift;;
+  esac
+done
+
+set -- "${POSITIONAL[@]}"
+VIDEO="$1"
+
+[[ -z "$VIDEO" || ! -f "$VIDEO" ]] && { echo "❌ Valid video file required"; exit 1; }
+
+# --- Auto-match subtitle if not provided ---
+if [[ -z "$SUBS" ]]; then
+  BASENAME="${VIDEO%.*}"
+  if [[ -f "$BASENAME.srt" ]]; then
+    SUBS="$BASENAME.srt"
+    echo "ℹ️ Using matching subtitle: $SUBS"
+  else
+    echo "📥 Downloading subtitle using subliminal..."
+    subliminal download -l en "$VIDEO"
+    if [[ -f "$BASENAME.srt" ]]; then
+      SUBS="$BASENAME.srt"
+      echo "✅ Downloaded: $SUBS"
+    else
+      echo "❌ No subtitle found or downloaded."; exit 1;
+    fi
+  fi
+fi
+
+# --- Check for already encoded ---
+EXT="${VIDEO##*.}"
+BASE="${VIDEO%.*}"
+
+if [[ -f "${BASE}_soft.${EXT}" || -f "${BASE}_hard.${EXT}" ]]; then
+  echo "⚠️ Skipping: already encoded (_soft or _hard exists)"
+  exit 0
+fi
+
+# --- Ask for hard or softcoding ---
+MODE=$(printf "soft\nhard" | fzf --prompt="Encode subtitles as: ")
+[[ -z "$MODE" ]] && { echo "❌ Cancelled."; exit 1; }
+
+OUT="${OUT:-${BASE}_${MODE}.${EXT}}"
+
+# --- Run ffmpeg ---
+echo "▶️ Encoding ($MODE) to $OUT"
+if [[ "$MODE" == "soft" ]]; then
+  ffmpeg -i "$VIDEO" -i "$SUBS" \
+    -c copy -c:s mov_text -metadata:s:s:0 language="$LANG" \
+    ${TITLE:+-metadata:s:s:0 title="$TITLE"} \
+    "$OUT"
+elif [[ "$MODE" == "hard" ]]; then
+  ffmpeg -i "$VIDEO" -vf "subtitles='$SUBS'" -c:a copy "$OUT"
+fi
+
+echo "✅ Done: $OUT"
+
