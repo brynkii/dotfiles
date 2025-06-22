@@ -39,23 +39,23 @@ dynamic_search() {
     # Check if the cache exists, is valid, and not empty
     if [[ -f "$cache_file" && -s "$cache_file" && ! $(find "$cache_file" -mmin +5) ]]; then
         # Use cached results immediately if valid and not empty
-        SELECTED_DIR=$(cat "$cache_file" | fzf --prompt="Select a directory: " --height=20 --reverse \
+        SELECTED_DIR=$(fzf --prompt="Select a directory: " --height=20 --reverse \
             --preview 'eza -l --tree --total-size --color=always --no-time --no-permissions --no-user {}' \
             --bind "ctrl-h:reload(cat '$HOME_CACHE_FILE')" \
             --bind "ctrl-s:reload(cat '$HIST_FILE' | sort -u)" \
             --bind "ctrl-r:reload(cat '$ROOT_CACHE_FILE')" \
-            --header 'Ctrl-H: Home Search | Ctrl-S: History Search | Ctrl-R: Root Search')
+            --header 'Ctrl-H: Home Search | Ctrl-S: History Search | Ctrl-R: Root Search' < "$cache_file")
     else
         # If no valid cache or empty cache, perform a fresh search and cache the result
         find "$search_path" -type d $(generate_exclude_args) 2>/dev/null > "$cache_file"
 
         # Now display the directories with fzf
-        SELECTED_DIR=$(cat "$cache_file" | fzf --prompt="Select a directory: " --height=20 --reverse \
+        SELECTED_DIR=$(fzf --prompt="Select a directory: " --height=20 --reverse \
             --preview 'eza -l --tree --total-size --color=always --no-time --no-permissions --no-user {}' \
             --bind "ctrl-h:reload(find $HOME -type d $(generate_exclude_args) 2>/dev/null)" \
             --bind "ctrl-s:reload(cat '$HIST_FILE' | sort -u)" \
             --bind "ctrl-r:reload(find / -maxdepth 5 -type d 2>/dev/null)" \
-            --header 'Ctrl-H: Home Search | Ctrl-S: History Search | Ctrl-R: Root Search')
+            --header 'Ctrl-H: Home Search | Ctrl-S: History Search | Ctrl-R: Root Search' < "$cache_file")
 
         # Update the cache in the background if directories are found
         if [[ -n "$SELECTED_DIR" ]]; then

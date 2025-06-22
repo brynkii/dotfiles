@@ -23,7 +23,7 @@ if [[ -z "$program_list" ]]; then
 fi
 
 # Use `fzf` to select a program
-selected_program=$(echo "$program_list" | fzf --height 40% --layout=reverse --header-lines=1 \
+selected_program=$(echo "$program_list" | fzf --query="$1" --height 40% --layout=reverse --header-lines=1 \
   --prompt="Select program to kill: ")
 
 # Exit if no program was selected

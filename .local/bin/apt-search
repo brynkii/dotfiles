@@ -7,7 +7,7 @@
 apt-cache search "" |\
 sort |\
 cut --delimiter " " --fields 1 |\
-fzf --multi --exact --preview-window down --preview-window=wrap --cycle --reverse  --preview 'apt-cache show {1}' |\
+fzf --query="$1" --multi --exact --preview-window down --preview-window=wrap --cycle --reverse  --preview 'apt-cache show {1}' |\
 xargs -r "$ld" apt install -yy
 
 
