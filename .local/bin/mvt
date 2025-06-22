@@ -39,9 +39,6 @@ color_preview_cmd() {
     fi
 }
 
-# Generate preview command string (safe eval'd in fzf)
-preview_command=$(color_preview_cmd)
-
 # Use find -print0 to handle any filenames
 IFS=$'\n' read -r -d '' -a selected_files < <(
     find . -mindepth 1 -maxdepth 1 -print0 | \
@@ -72,4 +69,4 @@ for rel_file in "${selected_files[@]}"; do
     $cmd -- "$src_path" "$dest_path"
 done
 
-echo "Files ${action,,}ed to $dest_dir"
+echo "Files ${action,,}d to $dest_dir"

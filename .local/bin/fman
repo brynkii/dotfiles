@@ -21,6 +21,7 @@ fi
 while true; do
   # FZF for selecting commands with additional features
   selection=$(cat "$cache_file" | fzf \
+    --query="$1" \
     --ansi \
     --prompt=' Man > ' \
     --preview 'man {1} | col -bx | batcat --language=man --plain --color always --theme="Monokai Extended"' \
