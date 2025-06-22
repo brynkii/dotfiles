@@ -631,3 +631,4 @@ export PATH="$PATH:/home/brian/.lmstudio/bin"
 # bun
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
+export PATH="/home/brian/.pixi/bin:$PATH"
