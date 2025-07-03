@@ -37,7 +37,8 @@ fi
 
 # Function to determine the preview layout based on terminal size
 get_preview_layout() {
-    local TERM_WIDTH=$(tput cols)
+    local TERM_WIDTH
+    TERM_WIDTH=$(tput cols)
     if [[ $TERM_WIDTH -lt 100 ]]; then
         echo "up:50%:wrap" # Horizontal preview
     else

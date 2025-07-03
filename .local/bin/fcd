@@ -17,9 +17,11 @@ touch "$LOG_FILE"  # Create log file if it doesn't exist
 
 # Function to generate exclude arguments for find
 generate_exclude_args() {
+    local args=()
     while read -r line; do
-        echo "-not -path '$line'"
+        args+=("-not" "-path" "$line")
     done < "$EXCLUDE_FILE"
+    echo "${args[@]}"
 }
 
 # Function to dynamically switch between search modes
@@ -47,7 +49,7 @@ dynamic_search() {
             --header 'Ctrl-H: Home Search | Ctrl-S: History Search | Ctrl-R: Root Search' < "$cache_file")
     else
         # If no valid cache or empty cache, perform a fresh search and cache the result
-        find "$search_path" -type d $(generate_exclude_args) 2>/dev/null > "$cache_file"
+                find "$search_path" -type d "$(generate_exclude_args)" 2>/dev/null > "$cache_file"
 
         # Now display the directories with fzf
         SELECTED_DIR=$(fzf --prompt="Select a directory: " --height=20 --reverse \
@@ -70,7 +72,7 @@ update_cache() {
     local search_path="$2"
 
     # Update the cache
-    find "$search_path" -type d $(generate_exclude_args) 2>/dev/null > "$cache_file"
+    find "$search_path" -type d "$(generate_exclude_args)" 2>/dev/null > "$cache_file"
     
     # Notify user that the cache update is complete
     notify-send "Cache Update Complete" "The directory cache has been updated for $search_path."
@@ -84,7 +86,8 @@ update_cache() {
 # Function to clean up history
 cleanup_history() {
     echo "Cleaning up history file..."
-    local temp_file=$(mktemp)
+    local temp_file
+    temp_file=$(mktemp)
     while read -r dir; do
         if [[ -d "$dir" ]]; then
             echo "$dir" >> "$temp_file"
@@ -96,8 +99,10 @@ cleanup_history() {
 
 # Function to display statistics
 show_statistics() {
-    local total_dirs=$(wc -l < "$HIST_FILE")
-    local unique_dirs=$(sort -u "$HIST_FILE" | wc -l)
+    local total_dirs
+    total_dirs=$(wc -l < "$HIST_FILE")
+    local unique_dirs
+    unique_dirs=$(sort -u "$HIST_FILE" | wc -l)
     echo "Total directories in history: $total_dirs"
     echo "Unique directories in history: $unique_dirs"
 }
@@ -152,6 +157,6 @@ if [[ -d "$ABS_DIR" && -r "$ABS_DIR" ]]; then
     echo "$ABS_DIR" >> "$HIST_FILE"
 else
     echo "Invalid or inaccessible directory: $SELECTED_DIR"
-    > "$TEMP_FILE"
+    true > "$TEMP_FILE"
 fi
 

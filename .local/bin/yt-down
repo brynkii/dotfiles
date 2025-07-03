@@ -43,21 +43,25 @@ for cmd in "${deps[@]}"; do
 done
 
 # Select output directory
-ROOT_DIR="$HOME/Videos/youtube"
-mkdir -p "$ROOT_DIR"
+AUDIO_DIR="$HOME/Music"
+YT_DIR="$HOME/Videos/youtube"
+mkdir -p "$YT_DIR"
 
-EXISTING_DIRS=("$(find "$ROOT_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)")
-DIR_CHOICES=("Create new directory" "None (use root)" "${EXISTING_DIRS[@]}")
+EXISTING_DIRS=("$(find "$YT_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)")
+DIR_CHOICES=("Create new directory" "None (use root)" "Music (root)" "${EXISTING_DIRS[@]}")
 SELECTED_DIR=$(printf "%s\n" "${DIR_CHOICES[@]}" | fzf --prompt="Choose output directory: ")
 
 case "$SELECTED_DIR" in
   "Create new directory")
     read -rp "Enter new directory name: " NEW_DIR
-    OUT_DIR="$ROOT_DIR/$NEW_DIR"
+    OUT_DIR="$YT_DIR/$NEW_DIR"
     mkdir -p "$OUT_DIR"
     ;;
   "None (use root)")
-    OUT_DIR="$ROOT_DIR"
+    OUT_DIR="$YT_DIR"
+    ;;
+  "Music (root)")
+    OUT_DIR="$AUDIO_DIR"
     ;;
   *)
     OUT_DIR="$SELECTED_DIR"

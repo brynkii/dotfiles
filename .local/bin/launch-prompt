@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+
+# launch-prompt2 - A script to launch a command in a new tmux pane,
+# with setup for a .env file and a project description in GEMINI.md.
+
+# === Best Practices ===
+
+# === CONFIG ===
+CMD="${1:-gemini}"                                  # Default command is 'gemini'
+PROMPT_ENV_PATH="$HOME/.local/share/prompt/.env"
+TEMP_ENV_FILE=".env"                                # Temporary .env file in CWD
+
+# === Trap ===
+# Exit gracefully on Ctrl+C
+trap "echo -e '\n❌ Aborted.'; exit 1" SIGINT
+
+# === 1. Check for tmux ===
+check_tmux() {
+    if [ -z "$TMUX" ]; then
+        echo "❌ Not inside a tmux session. Exiting." >&2
+        exit 1
+    fi
+}
+
+# === 2. Copy .env to CWD ===
+copy_env() {
+    if [ -f "$PROMPT_ENV_PATH" ]; then
+        cp "$PROMPT_ENV_PATH" "$TEMP_ENV_FILE"
+        echo "✅ Copied .env file from $PROMPT_ENV_PATH to $TEMP_ENV_FILE."
+    else
+        echo "ℹ️  .env file not found at $PROMPT_ENV_ENV_PATH. Skipping .env copy."
+    fi
+}
+
+# === 3. Prompt to create/edit GEMINI.md ===
+prompt_md() {
+    read -rp "📝 Create or edit GEMINI.md in this directory? [y/N]: " answer
+    if [[ "$answer" =~ ^[Yy]$ ]]; then
+        read -rp "Enter a project description (optional): " project_desc
+        {
+            echo -e "\n## ✨ Entry: $(date +'%Y-%m-%d %H:%M:%S')"
+            echo "Started command: $CMD"
+            if [[ -n "$project_desc" ]]; then
+                echo "$project_desc"
+            fi
+        } >> GEMINI.md
+        echo "📄 Wrote entry to GEMINI.md."
+    else
+        echo "ℹ️ Skipped GEMINI.md update."
+    fi
+}
+
+# === 4. Create new tmux pane and run command ===
+create_pane_and_run() {
+    echo "🪟 Creating new tmux pane..."
+    local new_pane
+    new_pane=$(tmux split-pane -h -P -F '#{pane_id}')
+
+    # Wait for the pane to be ready
+    sleep 3
+
+    tmux send-keys -t "$new_pane" "$CMD" C-m
+    echo "✅ Command sent to new pane: $new_pane"
+}
+
+# === 5. Main ===
+main() {
+    check_tmux
+    copy_env
+    prompt_md
+    create_pane_and_run
+}
+
+main

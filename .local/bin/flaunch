@@ -5,7 +5,7 @@ DIR2="/bin"
 DIR3="/usr/sbin"
 DIR4="/usr/local/bin"
 
-Menu="$(ls -a $DIR1 $DIR2 $DIR3 $DIR4 | uniq -u \
+Menu="$(find "$DIR1" "$DIR2" "$DIR3" "$DIR4" -maxdepth 1 -type f -printf "%f\n" | uniq -u \
     | fzf --prompt="Which Program Would You Like To Run?: " \
     --query="$1" \
     --border=rounded \

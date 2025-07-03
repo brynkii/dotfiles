@@ -20,7 +20,7 @@ fi
 
 while true; do
   # FZF for selecting commands with additional features
-  selection=$(cat "$cache_file" | fzf \
+  selection=$(fzf \
     --query="$1" \
     --ansi \
     --prompt=' Man > ' \
@@ -29,7 +29,7 @@ while true; do
     --bind "ctrl-r:+change-preview(man {1})+change-prompt( Man >)" \
     --bind "ctrl-h:+change-preview(echo -e '$help_message')+change-prompt( Help > )" \
     --bind "ctrl-q:abort" \
-    --preview-window '50%,rounded,<50(down,70%,border-bottom)')
+    --preview-window '50%,rounded,<50(down,70%,border-bottom)' < "$cache_file")
 
   # Exit if no selection
   [[ -z "$selection" ]] && break
