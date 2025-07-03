@@ -1,0 +1,8 @@
+# MPD state files
+database
+pid
+state
+sticker.sql
+
+# Environment variables
+.env

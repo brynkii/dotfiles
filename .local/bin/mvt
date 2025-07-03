@@ -31,11 +31,11 @@ cmd="mv"
 # Function for colorized file preview
 color_preview_cmd() {
     if command -v eza &>/dev/null; then
-        echo 'eza --color=always --all --oneline'
+        printf 'eza --color=always --all --oneline\n'
     elif ls --color=always &>/dev/null; then
-        echo 'ls --color=always -1A'
+        printf 'ls --color=always -1A\n'
     else
-        echo 'find . -maxdepth 1 -mindepth 1 -printf "%f\n"'
+        printf 'find . -maxdepth 1 -mindepth 1 -printf "%%f\n"\n'
     fi
 }
 

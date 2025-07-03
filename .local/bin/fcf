@@ -38,7 +38,7 @@ list_previous_selections() {
     fi
 
     echo "Select a file from previous selections:"
-    SELECTED=$(cat "$SELECTIONS_LOG" | fzf --prompt="Select a file: " --preview="batcat --color=always --style=plain {} 2>/dev/null || head -n 20 {}" --preview-window=up:10)
+    SELECTED=$(fzf --prompt="Select a file: " --preview="batcat --color=always --style=plain {} 2>/dev/null || head -n 20 {}" --preview-window=up:10 < "$SELECTIONS_LOG")
 
     if [[ -n "$SELECTED" ]]; then
         echo "You selected: $SELECTED"
@@ -72,7 +72,8 @@ update_all_caches() {
 handle_name_collision() {
     local file_path="$1"
     local dest_dir="$2"
-    local base_name=$(basename "$file_path")
+    local base_name
+    base_name=$(basename "$file_path")
     local extension="${base_name##*.}"
     local file_name="${base_name%.*}"
     local counter=1
@@ -119,8 +120,7 @@ done
 # Ensure the destination directory exists
 if [ ! -d "$DEST_DIR" ]; then
     echo "Destination directory '$DEST_DIR' does not exist. Creating it..."
-    mkdir -p "$DEST_DIR"
-    if [ $? -ne 0 ]; then
+    if ! mkdir -p "$DEST_DIR"; then
         echo "Failed to create destination directory. Exiting."
         exit 1
     fi
@@ -139,7 +139,7 @@ fi
 
 # Launch fzf for selection (defaulting to Home cache)
 fzf_combined_content() {
-    cat "$HOME_CACHE" | tail -n +2 | fzf --multi --prompt="Select files: " \
+    tail -n +2 "$HOME_CACHE" | fzf --multi --prompt="Select files: " \
         --bind "ctrl-h:reload(cat $HOME_CACHE | tail -n +2),ctrl-r:reload(cat $ROOT_CACHE | tail -n +2),ctrl-s:reload(cat $SELECTIONS_LOG),ctrl-c:abort" \
         --preview="batcat --color=always --style=plain {} 2>/dev/null || head -n 20 {}" \
         --preview-window=up:10 \
@@ -165,9 +165,7 @@ echo "Copying selected files to '$DEST_DIR'..."
 while IFS= read -r FILE; do
     DEST_NAME=$(handle_name_collision "$FILE" "$DEST_DIR")
     DEST_PATH="$DEST_DIR/$DEST_NAME"
-    cp "$FILE" "$DEST_PATH"
-
-    if [ $? -eq 0 ]; then
+    if cp "$FILE" "$DEST_PATH"; then
         echo "Successfully copied '$FILE' to '$DEST_PATH'."
         echo "$DEST_PATH" >> "$COPIED_LOG"
     else

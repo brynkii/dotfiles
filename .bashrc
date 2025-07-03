@@ -614,7 +614,6 @@ fi
 # Configuring direnv
 eval "$(direnv hook bash)"
 
-source /home/brian/.config/broot/launcher/bash/br
 
 [ -f ~/.fzf.bash ] && source ~/.fzf.bash
 export PATH="/home/brian/.config/herd-lite/bin:$PATH"
@@ -632,3 +631,4 @@ export PATH="$PATH:/home/brian/.lmstudio/bin"
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
 export PATH="/home/brian/.pixi/bin:$PATH"
+eval "$(pixi completion --shell bash)"
