@@ -1,0 +1,516 @@
+#!/bin/bash
+
+# FreeDesktop.org Trash Specification implementation in bash
+# With file type indicators and safety features
+
+# Color setup
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Configuration
+TRASH_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/Trash"
+FILES_DIR="$TRASH_DIR/files"
+INFO_DIR="$TRASH_DIR/info"
+VERBOSE=false
+
+# File type emojis
+declare -A FILE_TYPES=(
+    [directory]="📁"
+    [executable]="⚙️"
+    [text]="📄"
+    [image]="🖼️"
+    [video]="🎬"
+    [audio]="🎵"
+    [archive]="📦"
+    [default]="📄"
+)
+
+# Check if fzf is installed
+check_fzf() {
+    if ! command -v fzf >/dev/null; then
+        echo "Error: fzf is not installed but required for this feature" >&2
+        echo "Install with:"
+        echo "  sudo apt install fzf (Debian/Ubuntu)"
+        echo "  brew install fzf (macOS)"
+        echo "Or see: https://github.com/junegunn/fzf"
+        exit 1
+    fi
+}
+
+# Initialize trash directories
+init_trash() {
+    mkdir -p "$FILES_DIR" "$INFO_DIR" || {
+        echo -e "${RED}Error:${NC} Could not create trash directories" >&2
+        exit 1
+    }
+}
+
+# Get file type indicator
+get_file_type() {
+    local file="$1"
+    if [ ! -e "$file" ]; then
+        echo "❓"
+        return
+    fi
+
+    if [ -d "$file" ]; then
+        echo "${FILE_TYPES[directory]}"
+    elif [ -x "$file" ]; then
+        echo "${FILE_TYPES[executable]}"
+    else
+        case $(file -b --mime-type "$file") in
+            text/*) echo "${FILE_TYPES[text]}" ;;
+            image/*) echo "${FILE_TYPES[image]}" ;;
+            video/*) echo "${FILE_TYPES[video]}" ;;
+            audio/*) echo "${FILE_TYPES[audio]}" ;;
+            application/zip|application/gzip|application/x-*) echo "${FILE_TYPES[archive]}" ;;
+            *) echo "${FILE_TYPES[default]}" ;;
+        esac
+    fi
+}
+
+# Move a file to trash
+trash_file() {
+    local file_path="$1"
+    local absolute_path
+    
+    # Get absolute path safely
+    if [ "${file_path:0:1}" != "/" ]; then
+        if ! absolute_path="$(realpath -e "$file_path" 2>/dev/null)"; then
+            echo -e "${RED}Error:${NC} File not found: $file_path" >&2
+            return 1
+        fi
+    else
+        absolute_path="$file_path"
+        if [ ! -e "$absolute_path" ]; then
+            echo -e "${RED}Error:${NC} File not found: $absolute_path" >&2
+            return 1
+        fi
+    fi
+
+    local basename
+    basename="$(basename "$absolute_path")"
+    local trash_file="$FILES_DIR/$basename"
+    local counter=1
+    
+    # Handle duplicate names in trash
+    while [ -e "$trash_file" ]; do
+        trash_file="$FILES_DIR/$basename.$counter"
+        ((counter++))
+    done
+    
+    # Create trashinfo file
+    local trash_info
+    trash_info="$INFO_DIR/$(basename "$trash_file").trashinfo"
+    if $VERBOSE; then
+        echo -e "${BLUE}Info:${NC} Creating trashinfo: $trash_info"
+    fi
+    
+    cat > "$trash_info" <<EOF
+[Trash Info]
+Path=$absolute_path
+DeletionDate=$(date +%Y-%m-%dT%H:%M:%S)
+EOF
+    
+    # Move the file to trash
+    if $VERBOSE; then
+        echo -e "${BLUE}Info:${NC} Moving $absolute_path to $trash_file"
+    fi
+    
+    if ! mv -- "$absolute_path" "$trash_file"; then
+        echo -e "${RED}Error:${NC} Failed to trash file: $absolute_path" >&2
+        rm -f -- "$trash_info"
+        return 1
+    fi
+    
+    local file_type
+    file_type=$(get_file_type "$trash_file")
+    echo -e "${GREEN}Trashed:${NC} $file_type $absolute_path -> $trash_file"
+}
+
+# List trash contents with size and type information
+list_trash_for_fzf() {
+    shopt -s dotglob
+    for info_file in "$INFO_DIR"/*.trashinfo; do
+        [ -e "$info_file" ] || continue
+        
+        local original_path deletion_date trashed_name size file_type
+        original_path=$(grep '^Path=' "$info_file" | cut -d= -f2-)
+        deletion_date=$(grep '^DeletionDate=' "$info_file" | cut -d= -f2-)
+        trashed_name="$(basename "${info_file%.trashinfo}")"
+        
+        if [ -e "$FILES_DIR/$trashed_name" ]; then
+            size=$(du -sh "$FILES_DIR/$trashed_name" 2>/dev/null | cut -f1)
+            size=${size:-"?"}
+            file_type=$(get_file_type "$FILES_DIR/$trashed_name")
+        else
+            size="MISSING"
+            file_type="❓"
+        fi
+        
+        echo -e "$file_type\t$trashed_name\t$original_path\t$size\t(deleted: $deletion_date)"
+    done
+    shopt -u dotglob
+}
+
+# Display trash contents
+list_trash() {
+    echo -e "${BLUE}Trash contents:${NC}"
+    echo -e "--------------------------------------------------"
+    
+    if [ ! -d "$INFO_DIR" ] || [ -z "$(ls -a "$INFO_DIR")" ]; then
+        echo -e "${YELLOW}Trash is empty${NC}"
+        return
+    fi
+    
+    (
+        echo -e "Type\tName\tOriginal Path\tSize\tDeleted"
+        list_trash_for_fzf
+    ) | column -t -s $'\t'
+}
+
+# Show trash statistics
+show_stats() {
+    local total_size file_count info_count
+    
+    echo -e "${BLUE}Trash Statistics:${NC}"
+    echo -e "---------------------"
+    
+    if [ ! -d "$FILES_DIR" ] || [ ! -d "$INFO_DIR" ]; then
+        echo -e "${YELLOW}Trash system not properly initialized${NC}"
+        return 1
+    fi
+    
+    file_count=$(find "${FILES_DIR:?}" -mindepth 1 -maxdepth 1 -print | wc -l)
+    info_count=$(find "${INFO_DIR:?}" -mindepth 1 -maxdepth 1 -print | wc -l)
+    total_size=$(du -sh "${TRASH_DIR:?}" | cut -f1)
+    
+    echo -e "Location:    ${GREEN}$TRASH_DIR${NC}"
+    echo -e "Total size:  ${GREEN}$total_size${NC}"
+    echo -e "Files:       ${GREEN}$file_count${NC}"
+    echo -e "Metadata:    ${GREEN}$info_count${NC}"
+    
+    if [ "$file_count" -ne "$info_count" ]; then
+        echo -e "${YELLOW}Warning:${NC} File count and metadata count don't match"
+        return 1
+    fi
+}
+
+# Empty the trash
+empty_trash() {
+    local file_count info_count
+    
+    file_count=$(find "${FILES_DIR:?}" -mindepth 1 -maxdepth 1 -print | wc -l)
+    info_count=$(find "${INFO_DIR:?}" -mindepth 1 -maxdepth 1 -print | wc -l)
+    
+    if [ "$file_count" -eq 0 ] && [ "$info_count" -eq 0 ]; then
+        echo -e "${YELLOW}Trash is already empty${NC}"
+        return
+    fi
+    
+    echo -e "${BLUE}Emptying trash:${NC} ${file_count} files, ${info_count} metadata entries"
+    
+    local success=true
+    if command -v parallel >/dev/null && [ "$file_count" -gt 50 ]; then
+        echo -e "${BLUE}Info:${NC} Using parallel deletion"
+        find "${FILES_DIR:?}" -mindepth 1 -print0 | parallel -0 rm -rf {} || success=false
+        find "${INFO_DIR:?}" -mindepth 1 -print0 | parallel -0 rm -rf {} || success=false
+    else
+        rm -rf -- "${FILES_DIR:?}"/* "${INFO_DIR:?}"/* || success=false
+    fi
+    
+    if [ "$success" = true ]; then
+        echo -e "${GREEN}Trash emptied${NC}"
+    else
+        echo -e "${RED}Error:${NC} Failed to empty trash completely" >&2
+        return 1
+    fi
+}
+
+# Find all possible restore locations
+find_restore_locations() {
+    # Always include these standard options
+    echo -e "ORIGINAL\tRestore to original location"
+    echo -e "CWD\tRestore to current directory ($PWD)"
+    
+    # Find recent directories (last 30 days) from history
+    if [ -f "$HOME/.bash_history" ]; then
+        grep -E '^cd ' "$HOME/.bash_history" | sed -E 's/^cd +//;s/[&;|].*//' | \
+        sort | uniq | while read -r dir; do
+            [ -d "$dir" ] && echo -e "$dir\tRecent directory (from history)"
+        done
+    fi
+    
+    # Find bookmarked directories (common bookmark systems)
+    if [ -f "$HOME/.config/gtk-3.0/bookmarks" ]; then
+        awk -F'file://' '{print $2}' "$HOME/.config/gtk-3.0/bookmarks" | \
+        while read -r dir; do
+            [ -d "$dir" ] && echo -e "$dir\tBookmarked directory"
+        done
+    fi
+    
+    # Add parent of original path if different from above
+    list_trash_for_fzf | cut -d$'\t' -f2 | xargs -n1 dirname | sort -u | \
+    while read -r dir; do
+        if [ -d "$dir" ]; then
+            echo -e "$dir\tParent of original path"
+        fi
+    done
+}
+
+# Select restore location with fzf
+select_restore_location() {
+    local original_path="$1"
+    local location_opts selected location
+    
+    # Prepare location options
+    location_opts=$(find_restore_locations | sort -u)
+    
+    # Add custom option at the end
+    location_opts+=$'\n'"CUSTOM\tType custom directory path"
+    
+    # Select with fzf
+    selected=$(echo "$location_opts" | fzf --height=40% --reverse \
+        --header="Select restore location for $(basename "$original_path")" \
+        --delimiter=$'\t' --with-nth=2)
+    
+    if [ -z "$selected" ]; then
+        echo "CANCELLED"
+        return 1
+    fi
+    
+    location=$(echo "$selected" | cut -d$'\t' -f1)
+    
+    if [ "$location" = "CUSTOM" ]; then
+        # Use fzf to browse filesystem for directory selection
+        location=$(find ~ / -type d 2>/dev/null | fzf --height=40% --reverse \
+            --header="Select target directory (ESC to cancel)" \
+            --preview="ls -la {}")
+        
+        [ -z "$location" ] && { echo "CANCELLED"; return 1; }
+        echo "$location"
+    elif [ "$location" = "ORIGINAL" ]; then
+        echo "ORIGINAL"
+    elif [ "$location" = "CWD" ]; then
+        echo "CWD"
+    else
+        echo "$location"
+    fi
+}
+
+# Restore files
+restore_files() {
+    check_fzf
+    
+    # Get selected items from fzf (multi-select enabled)
+    local selected
+    selected=$(list_trash_for_fzf | fzf --multi --height=40% --reverse \
+        --header="Select files to restore (TAB to select multiple)" \
+        --preview='echo -e "Original location: {2}\nDeleted: {3}"' \
+        --delimiter=$'\t' --with-nth=1,2 | cut -d$'\t' -f2)
+    
+    [ -z "$selected" ] && { echo -e "${YELLOW}No files selected${NC}"; return; }
+    
+    # Restore each selected file
+    local restored_count=0
+    while read -r trashed_name; do
+        local info_file original_path trashed_file restore_location destination_path
+        
+        info_file="$INFO_DIR/$trashed_name.trashinfo"
+        
+        if [ ! -f "$info_file" ]; then
+            echo -e "${RED}Error:${NC} Trash info not found for: $trashed_name" >&2
+            continue
+        fi
+        
+        original_path=$(grep '^Path=' "$info_file" | cut -d= -f2-)
+        trashed_file="$FILES_DIR/$trashed_name"
+        
+        if [ ! -e "$trashed_file" ]; then
+            echo -e "${RED}Error:${NC} Trashed file not found: $trashed_file" >&2
+            continue
+        fi
+        
+        # Get restore location with fzf
+        if ! restore_location=$(select_restore_location "$original_path"); then
+            echo -e "${YELLOW}Skipping:${NC} $trashed_name"
+            continue
+        fi
+        
+        # Determine destination path
+        case "$restore_location" in
+            "ORIGINAL")
+                destination_path="$original_path"
+                ;;
+            "CWD")
+                destination_path="$PWD/$(basename "$original_path")"
+                ;;
+            *)
+                # Custom directory
+                destination_path="$restore_location/$(basename "$original_path")"
+                ;;
+        esac
+        
+        # Handle filename conflicts
+        if [ -e "$destination_path" ]; then
+            read -rp "File exists at $destination_path. Overwrite? [y/N] " overwrite
+            if [[ ! "$overwrite" =~ ^[Yy]$ ]]; then
+                echo -e "${YELLOW}Skipping:${NC} $trashed_name"
+                continue
+            fi
+        fi
+        
+        # Create parent directory if it doesn't exist (except for CWD)
+        if [ "$restore_location" != "CWD" ]; then
+            if ! mkdir -p "$(dirname "$destination_path")"; then
+                echo -e "${RED}Error:${NC} Could not create parent directory for: $destination_path" >&2
+                continue
+            fi
+        fi
+        
+        # Restore the file
+        if mv -- "$trashed_file" "$destination_path" && rm -- "$info_file"; then
+            echo -e "${GREEN}Restored:${NC} $trashed_name -> $destination_path"
+            ((restored_count++))
+        else
+            echo -e "${RED}Error:${NC} Failed to restore: $trashed_name" >&2
+        fi
+    done <<< "$selected"
+    
+    echo -e "${BLUE}Restored ${GREEN}$restored_count${BLUE} item(s)${NC}"
+}
+
+# Interactively Inspect trash contents with previews
+inspect_trash() {
+    check_fzf
+
+    local preview_cmd
+    local cat_cmd="cat"
+    local ls_cmd="ls -la"
+
+    if command -v bat >/dev/null; then
+        cat_cmd="bat --color=always --style=plain"
+    elif command -v batcat >/dev/null; then
+        cat_cmd="batcat --color=always --style=plain"
+    fi
+
+    if command -v eza >/dev/null; then
+        ls_cmd="eza --long --header --git"
+    fi
+
+    preview_cmd="
+        trashed_name=\$(echo {} | cut -d\$'\\t' -f2)
+        info_file=\"$INFO_DIR/\$trashed_name.trashinfo\"
+        trashed_item=\"$FILES_DIR/\$trashed_name\"
+
+        {
+            echo -e '${BLUE}--- Metadata ---${NC}'
+            if [ -f \"\$info_file\" ]; then
+                $cat_cmd \"\$info_file\"
+            else
+                echo -e '${RED}Info file not found!${NC}'
+            fi
+            echo
+            echo -e '${BLUE}--- Preview ---${NC}'
+            if [ -d \"\$trashed_item\" ]; then
+                $ls_cmd \"\$trashed_item\"
+            elif [ -f \"\$trashed_item\" ]; then
+                $cat_cmd \"\$trashed_item\"
+            else
+                echo -e '${RED}Trashed item not found!${NC}'
+            fi
+        } 2>/dev/null
+    "
+
+    list_trash_for_fzf | fzf --height=60% --reverse \
+        --header="Inspect trashed files (ESC to exit)" \
+        --delimiter=$'\t' --with-nth=1,2,3 \
+        --preview-window=right:50%:wrap \
+        --preview="$preview_cmd"
+}
+
+
+# Show usage information
+usage() {
+    cat <<EOF
+Usage: ${0##*/} [options] [file...] [command] [arguments]
+
+Options:
+  -v, --verbose    Show detailed operations
+
+Default operation (no command): Move files to trash
+  trash file1.txt file2.txt
+
+Commands:
+  list              List trashed files with types and sizes
+  stats             Show trash statistics
+  restore           Interactively restore files/dirs (using fzf)
+  Inspect           Interactively inspect trashed files/dirs
+  empty             Empty the trash completely
+  help              Show this help message
+
+Features:
+  - File type indicators (📁📄⚙️ etc.)
+  - Safe handling of special characters
+  - Color-coded output
+  - Size information
+EOF
+}
+
+# Main program
+main() {
+    # Parse options
+    while [[ "$1" == -* ]]; do
+        case "$1" in
+            -v|--verbose) VERBOSE=true; shift ;;
+            -h|--help) usage; exit 0 ;;
+            *) echo -e "${RED}Error:${NC} Unknown option: $1" >&2; usage >&2; exit 1 ;;
+        esac
+    done
+
+    init_trash
+    
+    # If no arguments, show help
+    if [ $# -eq 0 ]; then
+        usage
+        exit 0
+    fi
+    
+    # Check if first argument is a command
+    case "$1" in
+        list)
+            list_trash
+            ;;
+        stats)
+            show_stats
+            ;;
+        restore)
+            restore_files
+            ;;
+        inspect)
+            inspect_trash
+            ;;
+        empty)
+            empty_trash
+            ;;
+        help|--help|-h)
+            usage
+            ;;
+        *)
+            # Default operation: trash files
+            for file in "$@"; do
+                if [[ "$file" == -* ]]; then
+                    echo -e "${RED}Error:${NC} Unknown option '$file'" >&2
+                    usage >&2
+                    exit 1
+                fi
+                trash_file "$file" || exit 1
+            done
+            ;;
+    esac
+}
+
+main "$@"

@@ -12,7 +12,7 @@ if ! OUTPUT=$(echo "${RAW_OUTPUT}" | awk -F'|' '{ printf "IRQ %s %s\n", $1, $2 }
   exit 1
 fi
 
-if [ ! -z "${IRQ_REQ}" ]; then
+if [ -n "${IRQ_REQ}" ]; then
   if ! echo "${OUTPUT}" | grep -P "^(IRQ(\s+)?)?${IRQ_REQ}(\s+)?\:"; then
     echo "ERROR: Could not find interrupt '${IRQ_REQ}'."
   fi
