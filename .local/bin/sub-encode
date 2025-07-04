@@ -45,7 +45,7 @@ while [[ $# -gt 0 ]]; do
       exit 0;;
     --)
       shift; break;;
-    -*|--*)
+    -*)
       echo "Unknown option $1"; exit 1;;
     *)
       POSITIONAL+=("$1"); shift;;

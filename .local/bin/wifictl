@@ -10,9 +10,17 @@ wifictl(){
     connect)
     bssid="$(nmcli device wifi list | sed -n '1!p' | cut -b 9- | dmenu -l 10 -p "Select Wifi  :" | cut -d ' ' -f1)"
 
+    if [ -z "$bssid" ]; then
+        exit 0
+    fi
+
     pass=$(echo "" | dmenu -l 2 -p "Enter Password  :")
 
-    [ -z "$bssid" ] && exit 0 || [ -n "$pass" ] && nmcli device wifi connect "$bssid" password "$pass" || nmcli device wifi connect "$bssid"
+    if [ -n "$pass" ]; then
+        nmcli device wifi connect "$bssid" password "$pass"
+    else
+        nmcli device wifi connect "$bssid"
+    fi
     ;;
 
     disconnect)
@@ -20,12 +28,13 @@ wifictl(){
     ;;
 
     *)
-    printf ${red}"invalid argument: ${nc} $1 \n"
-    printf ${yellow}"valid arguments are:\n"
-    printf "connect\n"
-    printf "disconnect${nc}\n" && exit 1
+    printf '%b%s%b%s\n' "${red}" "invalid argument: " "${nc}" "$1"
+    printf '%b%s%b\n' "${yellow}" "valid arguments are:" "${nc}"
+    printf 'connect\n'
+    printf 'disconnect\n'
+    exit 1
     ;;
 esac
 }
-wifictl $1
+wifictl "$1"
 

@@ -167,7 +167,7 @@ export_bookmarks() {
     bookmarks+=("{ \"type\": $type, \"title\": \"$(jq -n --arg t "$title" '$t | @json')\", \"data\": \"$(jq -n --arg d "$data" '$d | @json')\", \"tags\": \"$(jq -n --arg tg "$tags" '$tg | @json')\" }")
   done < "$BOOKMARK_FILE"
 
-  printf "[\n%s\n]\n" "$(printf ",\n" "${bookmarks[@]}")"
+  printf "[\n%s\n]\n" "$(printf '%s,\n' "${bookmarks[@]}" | sed '$ s/,$//') "
 }
 
 import_bookmarks() {
@@ -180,8 +180,8 @@ import_bookmarks() {
     fi
 
     local -a bookmarks
-    bookmarks=($(jq -r '.[] | [.type, .title, .data, .tags] | @tsv' <<< "$json_data" 2>/dev/null))
-    if [[ $? -ne 0 ]]; then
+    mapfile -t bookmarks < <(jq -r '.[] | [.type, .title, .data, .tags] | @tsv' <<< "$json_data" 2>/dev/null)
+    if ! jq -r '.[] | [.type, .title, .data, .tags] | @tsv' <<< "$json_data" >/dev/null 2>&1; then
         notify-send "Invalid JSON data"
         return
     fi

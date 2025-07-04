@@ -57,7 +57,7 @@ create_pane_and_run() {
     new_pane=$(tmux split-pane -h -P -F '#{pane_id}')
 
     # Wait for the pane to be ready
-    sleep 3
+    sleep 4
 
     tmux send-keys -t "$new_pane" "$CMD" C-m
     echo "✅ Command sent to new pane: $new_pane"
