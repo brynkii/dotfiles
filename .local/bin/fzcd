@@ -49,7 +49,7 @@ dynamic_search() {
             --header 'Ctrl-H: Home Search | Ctrl-S: History Search | Ctrl-R: Root Search' < "$cache_file")
     else
         # If no valid cache or empty cache, perform a fresh search and cache the result
-                find "$search_path" -type d "$(generate_exclude_args)" 2>/dev/null > "$cache_file"
+                find "$search_path" -type d $(generate_exclude_args) 2>/dev/null > "$cache_file"
 
         # Now display the directories with fzf
         SELECTED_DIR=$(fzf --prompt="Select a directory: " --height=20 --reverse \
@@ -72,7 +72,7 @@ update_cache() {
     local search_path="$2"
 
     # Update the cache
-    find "$search_path" -type d "$(generate_exclude_args)" 2>/dev/null > "$cache_file"
+    find "$search_path" -type d $(generate_exclude_args) 2>/dev/null > "$cache_file"
     
     # Notify user that the cache update is complete
     notify-send "Cache Update Complete" "The directory cache has been updated for $search_path."

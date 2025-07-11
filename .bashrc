@@ -263,7 +263,7 @@ alias treed='tree -CAFd'
 alias ps='ps -auxf'
 alias ping='ping -c 10'
 alias mkdir='mkdir -p'
-alias rm="trash -v"
+alias rm="trash"
 
 # show open ports
 alias openports='netstat -nape --inet'

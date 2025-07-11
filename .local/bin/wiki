@@ -5,4 +5,4 @@ wiki () {
   lynx "https://en.wikipedia.org/wiki/Special:Search/$url"
 }
 
-wiki $*
+wiki "$@"

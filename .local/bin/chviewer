@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+
+# 📁 Header search paths
+HEADER_PATHS=(
+  /usr/include
+  /usr/local/include
+  /usr/include/x86_64-linux-gnu
+  /usr/lib/gcc/*/*/include
+)
+
+# 🌟 Use user-defined editor or default to nvim
+: "${EDITOR:=nvim}"
+
+# 🔍 Collect header files (support C and C++ headers)
+mapfile -t HEADERS < <(
+  find "${HEADER_PATHS[@]}" \
+    \( -name '*.h' -o -name '*.hpp' -o -name '*.hh' -o -name '*.hxx' \) \
+    -type f 2>/dev/null | sort -u
+)
+
+if [[ ${#HEADERS[@]} -eq 0 ]]; then
+  echo "No header files found."
+  exit 1
+fi
+
+# 📄 Previewer setup
+if command -v batcat &>/dev/null; then
+  PREVIEWER="batcat --style=plain --color=always --language=c"
+elif command -v head &>/dev/null; then
+  PREVIEWER="head -n 100"
+else
+  PREVIEWER="cat"
+fi
+
+# 🧠 Optional query from CLI arg
+QUERY=${1:-}
+
+# 📂 FZF selection
+SELECTED=$(printf '%s\n' "${HEADERS[@]}" | fzf \
+  --preview "$PREVIEWER {}" \
+  --height=90% \
+  --prompt="🔍 Header: " \
+  --query="$QUERY")
+
+# 📝 Open selected header
+if [[ -n "$SELECTED" ]]; then
+  "$EDITOR" "$SELECTED"
+else
+  echo "No header selected."
+  exit 1
+fi
