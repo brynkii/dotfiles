@@ -632,3 +632,11 @@ export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
 export PATH="/home/brian/.pixi/bin:$PATH"
 eval "$(pixi completion --shell bash)"
+
+# pnpm
+export PNPM_HOME="/home/brian/.local/share/pnpm"
+case ":$PATH:" in
+  *":$PNPM_HOME:"*) ;;
+  *) export PATH="$PNPM_HOME:$PATH" ;;
+esac
+# pnpm end

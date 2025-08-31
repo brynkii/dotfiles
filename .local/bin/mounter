@@ -146,7 +146,7 @@ receive_data() {
     [ "$confirm" != "yes" ] && { log_message "Receive cancelled."; return; }
 
     log_message "Receiving ${#file_array[@]} items to $HOME/Downloads..."
-    sudo -n rsync -a --progress "${file_array[@]}" "$HOME/Downloads" || error_exit "Receive failed!"
+    rsync -a --progress "${file_array[@]}" "$HOME/Downloads" || error_exit "Receive failed!"
     log_message "${GREEN}Received ${#file_array[@]} items${NC}"
 }
 
@@ -158,7 +158,7 @@ send_data() {
     for dir in "${SOURCE_DIRS[@]}"; do [ ! -d "$dir" ] && error_exit "Source directory $dir does not exist!"; done
     local free_space
     free_space=$(df -h "$MOUNT_POINT" | tail -1 | awk '{print $4}')
-    log_message "Free space on USB: $free_space"
+    log_message "${GREEN}Free space on USB: $free_space${NC}"
 
     local files
     files=$(find "${SOURCE_DIRS[@]}" -maxdepth 1 -type f -o -type d | grep -v "^${SOURCE_DIRS[0]}$" | grep -v "^${SOURCE_DIRS[1]}$" | \
@@ -178,7 +178,7 @@ send_data() {
     [ "$confirm" != "yes" ] && { log_message "Send cancelled."; return; }
 
     log_message "Sending ${#file_array[@]} items to $MOUNT_POINT..."
-    sudo -n rsync -a --progress "${file_array[@]}" "$MOUNT_POINT" || error_exit "Send failed!"
+    rsync -a --progress "${file_array[@]}" "$MOUNT_POINT" || error_exit "Send failed!"
     log_message "${GREEN}Sent ${#file_array[@]} items${NC}"
 
     log_message "Verifying integrity..."
@@ -255,12 +255,12 @@ else
         action=$(echo -e "Format\nReceive Data\nSend Data\nDelete Data\nList Data\nUnmount and Exit" | \
             fzf --prompt="Select action for $DEVICE: " --height=10) || break
         case "$action" in
-            "Format") format_usb "$DEVICE" ;;
-            "Receive Data") receive_data "$DEVICE" ;;
-            "Send Data") send_data "$DEVICE" ;;
-            "Delete Data") delete_data "$DEVICE" ;;
-            "List Data") list_data "$DEVICE" ;;
-            "Unmount and Exit") unmount_usb "$DEVICE"; break ;;
+            "💽 Format") format_usb "$DEVICE" ;;
+            "Receive Data (USB -> PC)") receive_data "$DEVICE" ;;
+            "Send Data(PC -> USB)") send_data "$DEVICE" ;;
+            "❌ Delete Data") delete_data "$DEVICE" ;;
+            "📂 List Data") list_data "$DEVICE" ;;
+            "⏏  Unmount and Exit") unmount_usb "$DEVICE"; break ;;
             *) log_message "Invalid action: $action" ;;
         esac
     done

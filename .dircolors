@@ -65,6 +65,8 @@ TERM xterm-88color
 TERM xterm-color
 TERM xterm-debian
 TERM xterm-termite
+TERM kitty
+TERM alacritty
 EIGHTBIT 1
 NORMAL 00
 FILE 00
@@ -190,6 +192,9 @@ EXEC 31  # Unix
 .ogg  33
 .ra 33
 .wav 33
+.oga 33
+.ra 33
+.wav 33
 
 # Video
 .anx 33
@@ -287,6 +292,10 @@ EXEC 31  # Unix
 *~ 01;32
 *# 01;32
 
+# backup files
+.crdownload 01;33
+.part 01;33
+.rej 01;33
 .bak 01;33
 .BAK 01;33
 .old 01;33
@@ -301,6 +310,8 @@ EXEC 31  # Unix
 .swp 01;33
 .swo 01;33
 *,v 01;33
+
+# encryption
 .gpg 34
 .gpg 34
 .pgp 34
