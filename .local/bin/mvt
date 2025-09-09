@@ -1,72 +1,180 @@
-#!/bin/bash
-# Move or copy files between tmux panes with color preview and full filename safety
+#!/usr/bin/env bash
+# move-to-last-pane.sh
+# Move files from current tmux pane to last, with undo support and previews.
 
-set -euo pipefail
+LOG_FILE="${XDG_CACHE_HOME:-$HOME/.local}/share/mvt/mvt.log"
+mkdir -p "$(dirname "$LOG_FILE")"
 
-# Get active and target tmux panes
-src_pane=$(tmux display-message -p "#D")
-target_pane=$(tmux list-panes -F "#{pane_id}" | grep -v "${src_pane}" | fzf --prompt="Select target pane: ")
+_bold() { printf "\033[1m%s\033[0m\n" "$*"; }
+_green() { printf "\033[0;32m%s\033[0m\n" "$*"; }
+_red() { printf "\033[0;31m%s\033[0m\n" "$*"; }
+_blue() { printf "\033[0;34m%s\033[0m\n" "$*"; }
 
-if [ -z "$target_pane" ] || ! tmux list-panes -F "#{pane_id}" | grep -q "$target_pane"; then
-    echo "No valid target pane selected. Exiting."
-    exit 1
-fi
+_move() {
+    local src dst
+    local files=("$@")
 
-# Get source and target directories
-src_dir=$(tmux display-message -p -F "#{pane_current_path}")
-dest_dir=$(tmux display-message -p -t "$target_pane" -F "#{pane_current_path}")
-cd "$src_dir" || exit 1
+    src=$(tmux display-message -p -F "#{pane_current_path}")
+    dst=$(tmux display-message -p -t '{last}' -F "#{pane_current_path}")
+    [[ -z $dst ]] && { echo "No last pane found." >&2; return 1; }
 
-# Ask user to choose move or copy
-action=$(printf "Move\nCopy" | fzf --prompt="Action: ")
-if [ -z "$action" ]; then
-    echo "No action selected. Exiting."
-    exit 1
-fi
+    cd "$src" || return 1
+    shopt -s nullglob dotglob
+    files=( "${files[@]}" )
 
-# Determine command to use
-cmd="mv"
-[ "$action" = "Copy" ] && cmd="cp -r"
+    [[ ${#files[@]} -eq 0 ]] && { echo "No matches." >&2; return 1; }
 
-# Function for colorized file preview
-color_preview_cmd() {
-    if command -v eza &>/dev/null; then
-        printf 'eza --color=always --all --oneline\n'
-    elif ls --color=always &>/dev/null; then
-        printf 'ls --color=always -1A\n'
-    else
-        printf 'find . -maxdepth 1 -mindepth 1 -printf "%%f\n"\n'
+    printf "=== %s ===\n" "$(date +%s)" >>"$LOG_FILE"
+    for f in "${files[@]}"; do
+        echo "$dst|$src/$f" >>"$LOG_FILE"
+        mv -- "$f" "$dst/"
+        _bold "Moved $f → $dst"
+    done
+}
+# FZF-based multi-select move function
+_fzf_move() {
+    local src dst
+    src=$(tmux display-message -p -F "#{pane_current_path}")
+    dst=$(tmux display-message -p -t '{last}' -F "#{pane_current_path}")
+
+
+    cd "$src" || return 1
+
+    if ! command -v fzf >/dev/null; then
+        _red "Error: fzf is required for this feature"
+        return 1
     fi
+
+    # Use fzf to select multiple files
+    local selected_files=()
+    while IFS= read -r -d '' file; do
+        selected_files+=("$file")
+    done < <(find . -maxdepth 1 -type f -o -type d -o -type l | sed 's|^\./||' | fzf --multi \
+        --prompt="Select files to move: " \
+        --preview='
+            item={}
+            if [ -d "$item" ]; then
+                echo "Directory: $item"
+                echo "Contents:"
+                ls -la "$item" 2>/dev/null | head -10
+            elif [ -f "$item" ]; then
+                echo "File: $item"
+                echo "Size: $(du -h "$item" 2>/dev/null | cut -f1)"
+                echo "Preview:"
+                batcat "$item" 2>/dev/null | sed "s/^/  /"
+            else
+                echo "Special: $item"
+            fi
+        ' --preview-window=right:50% --print0)
+    
+    [[ ${#selected_files[@]} -eq 0 ]] && { echo "No files selected."; return; }
+
+        printf "=== %s ===\n" "$(date +%s)" >>"$LOG_FILE"
+    
+    for f in "${selected_files[@]}"; do
+        echo "$dst|$src/$f|move" >>"$LOG_FILE"
+        mv -- "$f" "$dst/" && _bold "Moved $f → $dst"
+    done
 }
 
-# Use find -print0 to handle any filenames
-IFS=$'\n' read -r -d '' -a selected_files < <(
-    find . -mindepth 1 -maxdepth 1 -print0 | \
-    fzf --multi --read0 --prompt="Select files to $action: " \
-        --preview='file --mime "{}"' \
-        --preview-window=down:3:wrap \
-        --ansi --bind "ctrl-l:toggle-preview" --exit-0 | \
-    tr '\0' '\n' && printf '\0'
-)
+_undo() {
+    [[ ! -s $LOG_FILE ]] && { echo "Nothing to undo."; return; }
 
-# If nothing selected
-if [ ${#selected_files[@]} -eq 0 ]; then
-    echo "No files selected. Exiting."
-    exit 1
-fi
+    local block
+    block=$(tac "$LOG_FILE" | awk '/^===/{exit} {print}' | tac)
 
-# Perform the copy or move
-for rel_file in "${selected_files[@]}"; do
-    clean_file="${rel_file#./}"
-    src_path="$src_dir/$clean_file"
-    dest_path="$dest_dir/$clean_file"
+    [[ -z $block ]] && { echo "No undo info."; return; }
 
-    if [ -e "$dest_path" ]; then
-        read -rp "'$clean_file' exists in destination. Overwrite? [y/N]: " confirm
-        [[ "$confirm" != [Yy] ]] && echo "Skipping $clean_file" && continue
+    local entries=()
+    while IFS='|' read -r dst src; do
+        entries+=( "$dst|$src" )
+    done <<<"$block"
+
+    if command -v fzf >/dev/null; then
+        local chosen
+        chosen=$(printf "%s\n" "${entries[@]}" | fzf -m \
+            --delimiter="\|" \
+            --with-nth=2 \
+            --prompt="Undo which files? " \
+            --preview '
+                # Extract both source and destination paths
+                dst_path=$(echo {} | cut -d"|" -f1)
+                src_path=$(echo {} | cut -d"|" -f2)
+                fname=$(basename "$src_path")
+                
+                # Show informative header
+                echo "Source: $src_path"
+                echo "Destination: $dst_path/$fname"
+                echo "----------------------------------------"
+                
+                # Check if file exists at destination (where it was moved to)
+                if [ -e "$dst_path/$fname" ]; then
+                    if [ -d "$dst_path/$fname" ]; then
+                        echo "Directory preview:"
+                        ls -la "$dst_path/$fname" | head -10
+                    elif [ -f "$dst_path/$fname" ]; then
+                        echo "File preview:"
+                        head -10 "$dst_path/$fname" 2>/dev/null || echo "Preview not available"
+                    fi
+                else
+                    echo "File not found at destination"
+                    # Check if it already exists at source
+                    if [ -e "$src_path" ]; then
+                        echo "File already exists at source location"
+                    else
+                        echo "File missing from both locations"
+                    fi
+                fi
+            ' \
+            --preview-window=right:60%:wrap)
+        [[ -z $chosen ]] && return
+        mapfile -t entries <<<"$chosen"
+    else
+        # Fallback without fzf
+        echo "Select files to undo (by number):"
+        local i=1
+        for e in "${entries[@]}"; do
+            local src=${e#*|}
+            local fname
+            fname=$(basename "$src")
+            printf "%d) %s\n" "$i" "$fname"
+            ((i++))
+        done
+        read -rp "Enter numbers (space separated): " -a indices
+        local selected_entries=()
+        for idx in "${indices[@]}"; do
+            selected_entries+=("${entries[$((idx-1))]}")
+        done
+        entries=("${selected_entries[@]}")
     fi
 
-    $cmd -- "$src_path" "$dest_path"
-done
+    for e in "${entries[@]}"; do
+        local dst=${e%%|*}
+        local src=${e#*|}
+        local fname
+        fname=$(basename "$src")
 
-echo "Files ${action,,}d to $dest_dir"
+        if [[ -e "$dst/$fname" ]]; then
+            mv -- "$dst/$fname" "$src"
+            _bold "Undid: $fname → $src"
+        else
+            echo "Missing: $dst/$fname (skipped)"
+        fi
+    done
+
+    # Remove the undone entries from the log
+    tac "$LOG_FILE" | awk -v block="$block" '
+        BEGIN {skip=0} 
+        /^===/ {if (skip) skip=0; else print; next}
+        skip {next}
+        $0 == block {skip=1; next}
+        {print}
+    ' | tac >"$LOG_FILE.tmp"
+    mv "$LOG_FILE.tmp" "$LOG_FILE"
+}
+
+case "$1" in
+    -u|--undo) _undo ;;
+    -f|--fzf-move) _fzf_move ;;
+    *) _move "$@" ;;
+esac
