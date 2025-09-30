@@ -13,10 +13,13 @@ SOURCE_DIRS=("$HOME/Videos/movies" "$HOME/Downloads")
 LOG_FILE="$HOME/.local/share/mounter/usb_script.log"
 MOUNT_TIMEOUT=10  # Seconds to wait for mount before prompting
 
-# Function to log messages (always verbose)
+# Function to log messages
 log_message() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
-    echo "$1"
+    local msg="$1"
+    # strip colors for log file
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $(echo "$msg" | sed 's/\x1b\[[0-9;]*m//g')" >> "$LOG_FILE"
+    # print with colors
+    echo -e "$msg"
 }
 
 # Function to display error and exit
@@ -26,7 +29,6 @@ error_exit() {
 }
 
 # Cleanup function for unmounting on exit
-# shellcheck disable=SC2317  # Suppress unreachable code warning as trap ensures execution
 cleanup() {
     if [ -n "$MOUNT_POINT" ] && mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
         log_message "Cleaning up: Unmounting $DEVICE from $MOUNT_POINT"
@@ -38,7 +40,7 @@ trap cleanup EXIT
 
 # Function to list USB devices for fzf
 list_usb() {
-    lsblk -o NAME,SIZE,TYPE,MOUNTPOINT -r | grep -E "disk|part" | grep -v "$(df / | tail -1 | awk '{print $1}')" | \
+    lsblk -o NAME,SIZE,TYPE,MOUNTPOINT,TRAN -r | grep usb | \
         awk '{print $1 " (" $2 ", " $3 ", " $4 ")"}'
 }
 
@@ -48,17 +50,14 @@ mount_usb() {
     local mount_point="/mnt/usb_$RANDOM"
     local attempt=1 max_attempts=2
 
-    # Check if device exists
     [ -b "$device" ] || error_exit "Device $device does not exist!"
 
-    # Check if already mounted
     if mountpoint -q "$(lsblk -n -o MOUNTPOINT "$device")" 2>/dev/null; then
         MOUNT_POINT=$(lsblk -n -o MOUNTPOINT "$device")
         log_message "Device $device is already mounted at $MOUNT_POINT"
         return
     fi
 
-    # Create mount point
     sudo mkdir -p "$mount_point" || error_exit "Failed to create mount point $mount_point"
 
     while [ "$attempt" -le "$max_attempts" ]; do
@@ -79,7 +78,9 @@ mount_usb() {
     read -r -p "Format $device to resolve? (yes/no): " format_choice
     if [ "$format_choice" = "yes" ]; then
         format_usb "$device"
-        [ -z "$MOUNT_POINT" ] || ! mountpoint -q "$MOUNT_POINT" && error_exit "Failed to mount $device even after formatting!"
+        if [ -z "$MOUNT_POINT" ] || ! mountpoint -q "$MOUNT_POINT"; then
+            error_exit "Failed to mount $device even after formatting!"
+        fi
     else
         error_exit "Mounting failed and formatting skipped."
     fi
@@ -88,12 +89,15 @@ mount_usb() {
 # Function to unmount a USB drive with confirmation
 unmount_usb() {
     local device="$1"
-    [ -z "$MOUNT_POINT" ] || ! mountpoint -q "$MOUNT_POINT" 2>/dev/null && { log_message "Device $device is not mounted"; return; }
+    if [ -z "$MOUNT_POINT" ] || ! mountpoint -q "$MOUNT_POINT"; then
+        log_message "Device $device is not mounted"
+        return
+    fi
 
     local item_count space_used
     item_count=$(sudo ls -A "$MOUNT_POINT" | wc -l)
     space_used=$(sudo du -sh "$MOUNT_POINT" | cut -f1)
-    
+
     log_message "USB Contents Summary: $item_count items, $space_used used"
     read -r -p "Unmount $device from $MOUNT_POINT? (yes/no): " unmount_choice
     if [ "$unmount_choice" = "yes" ]; then
@@ -132,11 +136,13 @@ format_usb() {
 # Function to receive data from USB
 receive_data() {
     local device="$1"
-    [ -z "$MOUNT_POINT" ] || ! mountpoint -q "$MOUNT_POINT" && error_exit "USB drive is not mounted!"
+    if [ -z "$MOUNT_POINT" ] || ! mountpoint -q "$MOUNT_POINT"; then
+        error_exit "USB drive is not mounted!"
+    fi
 
     local files
-    files=$(sudo find "$MOUNT_POINT" -maxdepth 1 -type f -o -type d | grep -v "^$MOUNT_POINT$" | \
-        fzf --multi --prompt="Select files/directories to receive (TAB for multiple, Enter to confirm): " --height=20)
+    files=$(sudo find "$MOUNT_POINT" -maxdepth 1 \( -type f -o -type d \) | grep -v "^$MOUNT_POINT$" | \
+        fzf --multi --prompt="Select files/directories to receive: " --height=20)
     [ -z "$files" ] && { log_message "No files selected."; return; }
 
     mapfile -t file_array <<< "$files"
@@ -153,7 +159,9 @@ receive_data() {
 # Function to send data to USB
 send_data() {
     local device="$1"
-    [ -z "$MOUNT_POINT" ] || ! mountpoint -q "$MOUNT_POINT" && error_exit "USB drive is not mounted!"
+    if [ -z "$MOUNT_POINT" ] || ! mountpoint -q "$MOUNT_POINT"; then
+        error_exit "USB drive is not mounted!"
+    fi
 
     for dir in "${SOURCE_DIRS[@]}"; do [ ! -d "$dir" ] && error_exit "Source directory $dir does not exist!"; done
     local free_space
@@ -161,8 +169,9 @@ send_data() {
     log_message "${GREEN}Free space on USB: $free_space${NC}"
 
     local files
-    files=$(find "${SOURCE_DIRS[@]}" -maxdepth 1 -type f -o -type d | grep -v "^${SOURCE_DIRS[0]}$" | grep -v "^${SOURCE_DIRS[1]}$" | \
-        sed "s|$HOME/||" | fzf --multi --prompt="Select files/directories to send (TAB for multiple, Enter to confirm): " --height=20)
+    files=$(find "${SOURCE_DIRS[@]}" -maxdepth 1 \( -type f -o -type d \) | \
+        grep -v "^${SOURCE_DIRS[0]}$" | grep -v "^${SOURCE_DIRS[1]}$" | \
+        sed "s|$HOME/||" | fzf --multi --prompt="Select files/directories to send: " --height=20)
     [ -z "$files" ] && { log_message "No files selected."; return; }
 
     mapfile -t file_array <<< "$files"
@@ -184,9 +193,13 @@ send_data() {
     log_message "Verifying integrity..."
     for file in "${file_array[@]}"; do
         local base_name=${file##*/} src_checksum dest_checksum
-        src_checksum=$(sha256sum "$file" | awk '{print $1}')
-        dest_checksum=$(sha256sum "$MOUNT_POINT/$base_name" | awk '{print $1}')
-        [ "$src_checksum" = "$dest_checksum" ] || log_message "${RED}Integrity check failed for $base_name!${NC}"
+        if [ -f "$file" ]; then
+            src_checksum=$(sha256sum "$file" | awk '{print $1}')
+            if [ -f "$MOUNT_POINT/$base_name" ]; then
+                dest_checksum=$(sha256sum "$MOUNT_POINT/$base_name" | awk '{print $1}')
+                [ "$src_checksum" = "$dest_checksum" ] || log_message "${RED}Integrity check failed for $base_name!${NC}"
+            fi
+        fi
     done
     log_message "Integrity check complete."
 }
@@ -194,11 +207,13 @@ send_data() {
 # Function to delete data from USB
 delete_data() {
     local device="$1"
-    [ -z "$MOUNT_POINT" ] || ! mountpoint -q "$MOUNT_POINT" && error_exit "USB drive is not mounted!"
+    if [ -z "$MOUNT_POINT" ] || ! mountpoint -q "$MOUNT_POINT"; then
+        error_exit "USB drive is not mounted!"
+    fi
 
     local files
-    files=$(sudo find "$MOUNT_POINT" -maxdepth 1 -type f -o -type d | grep -v "^$MOUNT_POINT$" | \
-        fzf --multi --prompt="Select files/directories to delete (TAB for multiple, Enter to confirm): " --height=20)
+    files=$(sudo find "$MOUNT_POINT" -maxdepth 1 \( -type f -o -type d \) | grep -v "^$MOUNT_POINT$" | \
+        fzf --multi --prompt="Select files/directories to delete: " --height=20)
     [ -z "$files" ] && { log_message "No files selected."; return; }
 
     mapfile -t file_array <<< "$files"
@@ -215,13 +230,15 @@ delete_data() {
 # Function to list files on USB with previews
 list_data() {
     local device="$1"
-    [ -z "$MOUNT_POINT" ] || ! mountpoint -q "$MOUNT_POINT" && error_exit "USB drive is not mounted!"
+    if [ -z "$MOUNT_POINT" ] || ! mountpoint -q "$MOUNT_POINT"; then
+        error_exit "USB drive is not mounted!"
+    fi
 
     local preview_cmd
     preview_cmd=$(command -v batcat || command -v bat || echo "cat")
     command -v eza >/dev/null || error_exit "eza required for directory previews"
 
-    sudo find "$MOUNT_POINT" -maxdepth 1 -type f -o -type d | grep -v "^$MOUNT_POINT$" | \
+    sudo find "$MOUNT_POINT" -maxdepth 1 \( -type f -o -type d \) | grep -v "^$MOUNT_POINT$" | \
         fzf --preview "if [ -f {} ]; then sudo $preview_cmd {}; else sudo eza -la --tree --level=2 {}; fi" \
             --preview-window=right:50% --prompt="Files on $DEVICE (Enter to return): " --height=20
     log_message "Listed files on $DEVICE"
@@ -246,24 +263,24 @@ DEVICE="/dev/$(echo "$DEVICE_INFO" | awk '{print $1}')"
 if [ "$FORMAT_ONLY" = "true" ]; then
     log_message "Formatting USB drive (format-only mode)"
     format_usb "$DEVICE"
-else
-    log_message "Mounting USB device $DEVICE"
-    mount_usb "$DEVICE"  # Must succeed to continue
-
-    # fzf loop for operations
-    while true; do
-        action=$(echo -e "Format\nReceive Data\nSend Data\nDelete Data\nList Data\nUnmount and Exit" | \
-            fzf --prompt="Select action for $DEVICE: " --height=10) || break
-        case "$action" in
-            "💽 Format") format_usb "$DEVICE" ;;
-            "Receive Data (USB -> PC)") receive_data "$DEVICE" ;;
-            "Send Data(PC -> USB)") send_data "$DEVICE" ;;
-            "❌ Delete Data") delete_data "$DEVICE" ;;
-            "📂 List Data") list_data "$DEVICE" ;;
-            "⏏  Unmount and Exit") unmount_usb "$DEVICE"; break ;;
-            *) log_message "Invalid action: $action" ;;
-        esac
-    done
+    exit 0
 fi
+
+log_message "Mounting USB device $DEVICE"
+mount_usb "$DEVICE"
+
+while true; do
+    action=$(echo -e "💽 Format\n📥 Receive Data (USB -> PC)\n📤 Send Data (PC -> USB)\n❌ Delete Data\n📂 List Data\n⏏ Unmount and Exit" | \
+        fzf --prompt="Select action for $DEVICE: " --height=12) || break
+    case "$action" in
+        "💽 Format") format_usb "$DEVICE" ;;
+        "📥 Receive Data (USB -> PC)") receive_data "$DEVICE" ;;
+        "📤 Send Data (PC -> USB)") send_data "$DEVICE" ;;
+        "❌ Delete Data") delete_data "$DEVICE" ;;
+        "📂 List Data") list_data "$DEVICE" ;;
+        "⏏ Unmount and Exit") unmount_usb "$DEVICE"; break ;;
+        *) log_message "Invalid action: $action" ;;
+    esac
+done
 
 exit 0
