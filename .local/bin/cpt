@@ -5,151 +5,80 @@
 LOG_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/mv-to-last-pane.log"
 mkdir -p "$(dirname "$LOG_FILE")"
 
-_bold() { printf "\033[1m%s\033[0m\n" "$*"; }
-_green() { printf "\033[0;32m%s\033[0m\n" "$*"; }
-_red() { printf "\033[0;31m%s\033[0m\n" "$*"; }
-_blue() { printf "\033[0;34m%s\033[0m\n" "$*"; }
-_yellow() { printf "\033[0;33m%s\033[0m\n" "$*"; }
+_bold()   { printf "\033[1m%s\033[0m\n" "$*"; }
+_green()  { printf "\033[0;32m%s\033[0m\n" "$*"; }
+_red()    { printf "\033[0;31m%s\033[0m\n" "$*"; }
 
-# Get pane information with validation
+# Get pane path safely
 _get_pane_info() {
     local pane_id="$1"
-    local src=$(tmux display-message -p -t "$pane_id" -F "#{pane_current_path}" 2>/dev/null)
-    if [[ -z "$src" ]]; then
+    tmux display-message -p -t "$pane_id" -F "#{pane_current_path}" 2>/dev/null || {
         _red "Error: Cannot access pane $pane_id"
         return 1
-    fi
-    echo "$src"
+    }
 }
 
-# Independent copy function with recursion
+# Core copy function (always recursive for dirs)
 _copy() {
-    local recursive=false
-    local files=()
-    
-    # Parse options
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            -r|--recursive) recursive=true; shift ;;
-            *) files+=("$1"); shift ;;
-        esac
-    done
+    local src dst files=("$@")
 
-    local src dst
     src=$(_get_pane_info "$(tmux display-message -p -F '#{pane_id}')") || return 1
     dst=$(_get_pane_info "$(tmux display-message -p -t '{last}' -F '#{pane_id}')") || return 1
 
     cd "$src" || return 1
     shopt -s nullglob dotglob
-    files=( "${files[@]}" )
     [[ ${#files[@]} -eq 0 ]] && { _red "No matches."; return 1; }
 
-    local timestamp=$(date +%s)
-    printf "=== %s ===\n" "$timestamp" >>"$LOG_FILE"
-    
+    local ts=$(date +%s)
+    printf "=== %s ===\n" "$ts" >>"$LOG_FILE"
+
     for f in "${files[@]}"; do
-        if [[ ! -e "$f" ]]; then
-            _red "Not found: $f"
-            continue
-        fi
-        
+        [[ -e "$f" ]] || { _red "Not found: $f"; continue; }
         echo "$dst|$src/$f|copy" >>"$LOG_FILE"
-        
-        if [[ -d "$f" ]]; then
-            if [[ "$recursive" == true ]]; then
-                # Recursive directory copy
-                cp -r -- "$f" "$dst/" && _green "Copied directory $f/ → $dst/"
-            else
-                # Non-recursive - check if directory is empty
-                if [[ -z "$(ls -A "$f")" ]]; then
-                    cp -r -- "$f" "$dst/" && _green "Copied empty directory $f/ → $dst/"
-                else
-                    _yellow "Skipping non-empty directory: $f/ (use -r for recursive)"
-                fi
-            fi
-        else
-            # Regular file copy
-            cp -- "$f" "$dst/" && _green "Copied $f → $dst"
-        fi
+        cp -r -- "$f" "$dst/" && _green "Copied $f → $dst/"
     done
 }
 
-# FZF-based multi-select copy function
+# FZF-based multi-select
 _fzf_copy() {
-    local recursive=false
-    
-    # Parse options
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            -r|--recursive) recursive=true; shift ;;
-            *) shift ;;
-        esac
-    done
-
     local src dst
     src=$(_get_pane_info "$(tmux display-message -p -F '#{pane_id}')") || return 1
     dst=$(_get_pane_info "$(tmux display-message -p -t '{last}' -F '#{pane_id}')") || return 1
-
     cd "$src" || return 1
 
-    if ! command -v fzf >/dev/null; then
-        _red "Error: fzf is required for this feature"
-        return 1
-    fi
+    command -v fzf >/dev/null || { _red "Error: fzf required"; return 1; }
 
-    # Use fzf to select multiple files
-    local selected_files=()
-    while IFS= read -r -d '' file; do
-        selected_files+=("$file")
-    done < <(find . -maxdepth 1 \( -type f -o -type d -o -type l \) ! -name "." | sed 's|^\./||' | fzf --multi \
-        --prompt="Select files to copy: " \
-        --preview='
-            item={}
-            if [ -d "$item" ]; then
-                echo "Directory: $item"
-                echo "Contents:"
-                ls -la "$item" 2>/dev/null | head -10
-                if [ -n "$(ls -A "$item" 2>/dev/null)" ]; then
-                    echo "Status: Non-empty (use -r for recursive)"
+    mapfile -d '' selected < <(
+        find . -maxdepth 1 ! -name "." -printf '%P\0' |
+        fzf --multi \
+            --prompt="Select files: " \
+            --preview='
+                item={}
+                if [ -d "$item" ]; then
+                    echo "Directory: $item"
+                    ls -la "$item" 2>/dev/null | head -10
+                elif [ -f "$item" ]; then
+                    echo "File: $item"
+                    echo "Size: $(du -h "$item" 2>/dev/null | cut -f1)"
+                    head -5 "$item" 2>/dev/null
                 else
-                    echo "Status: Empty"
+                    echo "Special: $item"
                 fi
-            elif [ -f "$item" ]; then
-                echo "File: $item"
-                echo "Size: $(du -h "$item" 2>/dev/null | cut -f1)"
-                echo "Preview:"
-                head -5 "$item" 2>/dev/null | sed "s/^/  /"
-            else
-                echo "Special: $item"
-            fi
-        ' --preview-window=right:50% --print0)
-    
-    [[ ${#selected_files[@]} -eq 0 ]] && { echo "No files selected."; return; }
+            ' --preview-window=right:50% --print0
+    )
 
-    local timestamp=$(date +%s)
-    printf "=== %s ===\n" "$timestamp" >>"$LOG_FILE"
-    
-    for f in "${selected_files[@]}"; do
+    [[ ${#selected[@]} -eq 0 ]] && { echo "No selection."; return; }
+
+    local ts=$(date +%s)
+    printf "=== %s ===\n" "$ts" >>"$LOG_FILE"
+
+    for f in "${selected[@]}"; do
         echo "$dst|$src/$f|copy" >>"$LOG_FILE"
-        
-        if [[ -d "$f" ]]; then
-            if [[ "$recursive" == true ]]; then
-                cp -r -- "$f" "$dst/" && _green "Copied directory $f/ → $dst/"
-            else
-                if [[ -z "$(ls -A "$f")" ]]; then
-                    cp -r -- "$f" "$dst/" && _green "Copied empty directory $f/ → $dst/"
-                else
-                    _yellow "Skipping non-empty directory: $f/ (use -r for recursive)"
-                fi
-            fi
-        else
-            cp -- "$f" "$dst/" && _green "Copied $f → $dst"
-        fi
+        cp -r -- "$f" "$dst/" && _green "Copied $f → $dst/"
     done
 }
 
 case "$1" in
-    -f|--fzf-copy) _fzf_copy ;;
+    -f|--fzf-copy) shift; _fzf_copy "$@" ;;
     *) _copy "$@" ;;
 esac
-
