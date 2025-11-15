@@ -121,14 +121,14 @@ EOF
     fi
     
     if ! mv -- "$absolute_path" "$trash_file"; then
-        echo -e "${RED}Error:${NC} Failed to trash file: $absolute_path" >&2
+        echo -e "${RED}Error:${NC} Failed to trash 🗑 file: $absolute_path" >&2
         rm -f -- "$trash_info"
         return 1
     fi
     
     local file_type
     file_type=$(get_file_type "$trash_file")
-    echo -e "${GREEN}Trashed:${NC} $file_type $absolute_path -> $trash_file"
+    echo -e "${GREEN}🗑 Trashed:${NC} $file_type $absolute_path -> $trash_file"
 }
 
 # List trash contents with size and type information
