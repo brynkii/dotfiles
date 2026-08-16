@@ -640,3 +640,13 @@ case ":$PATH:" in
   *) export PATH="$PNPM_HOME:$PATH" ;;
 esac
 # pnpm end
+
+# opencode
+export PATH=/home/brian/.opencode/bin:$PATH
+
+# Pi
+export PATH="/home/brian/.asdf/installs/nodejs/23.6.0/bin:$PATH"
+
+
+# Added by Antigravity CLI installer
+export PATH="/home/brian/.local/bin:$PATH"
