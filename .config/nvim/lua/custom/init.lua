@@ -1,0 +1,6 @@
+require("custom.edit")
+require("custom.vertical-help")
+require("custom.qclose")
+require("custom.floatterminal")
+require("custom.pack")
+require("custom.format-on-save")
