@@ -1,361 +1,305 @@
-#!/bin/bash
+#!/USR/BIN/ENV BASH
+# GMP — GIT MULTI-PROJECT MANAGER (V1.8 - PARALLEL EDITION)
+# PULL UPDATES ACROSS ALL GIT REPOS, SAVE URLS FOR RECOVERY, RECOVER DELETED REPOS.
+# LOGS TO ~/.LOCAL/SHARE/GMP/ — CONFIGURE VIA ROOTS ARRAY OR GMP_ROOTS ENV VAR.
 
-# Start timer
-start_time=$(date +%s)
+SET -EUO PIPEFAIL
+IFS=$'\N\T'
+SHOPT -S NULLGLOB GLOBSTAR
 
-# Directory for storing logs
-log_dir="$HOME/.local/share/gmp"
-if ! mkdir -p "$log_dir" || ! touch "$log_dir/git_update_log.txt" "$log_dir/git_update_errors.log" "$log_dir/git_update_summary.txt" "$log_dir/successful_updates.txt" "$log_dir/failed_updates.txt"; then
-    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Error: Cannot create or write to log files in $log_dir. Aborting." >&2
-    exit 1
-fi
+READONLY LOG_DIR="$HOME/.LOCAL/SHARE/GMP"
+READONLY LOG_FILE="$LOG_DIR/LOG.TXT"
+READONLY URL_DIR="$LOG_DIR/URLS"
+READONLY SCAN_FILE="$LOG_DIR/REPOS.TXT"
+READONLY MAX_LOG_SIZE=$((10 * 1024 * 1024))  # 10MB
+READONLY PULL_TIMEOUT=60                     # SECONDS
 
-# Log file paths
-log_file="$log_dir/git_update_log.txt"
-error_log="$log_dir/git_update_errors.log"
-summary_file="$log_dir/git_update_summary.txt"
-success_file="$log_dir/successful_updates.txt"
-failure_file="$log_dir/failed_updates.txt"
-remote_urls_file="$log_dir/git_remote_urls.txt"
-previous_scan_file="$log_dir/previous_scan.txt"
+IFS=' ' READ -R -A ROOTS <<< "${GMP_ROOTS:-$HOME/REPOS $HOME/PROJECTS}"
+READONLY ROOTS
+READONLY JOBS=${JOBS:-4}
 
-# List of directories to exclude
-exclude_dirs=("$HOME/.local/share/Trash/*" "$HOME/Documents/akasha/*" "$HOME/.local/share/nvim/*")
+QUIET=0
+TMP_FILES=()
 
-# Convert the exclude list to find's `-path` format
-exclude_args=()
-for dir in "${exclude_dirs[@]}"; do
-    exclude_args+=(-path "$dir" -o -path "$dir/*")
-done
-
-# Display help message
-display_help() {
-    echo "Usage: $0 [OPTION]"
-    echo "Manage and update Git repositories."
-    echo
-    echo "Options:"
-    echo "  -r    Recover missing directories using saved remote URLs."
-    echo "  -s    Save Git remote URLs without updating repositories."
-    echo "  -l    List all Git directories using fzf."
-    echo "  -c    Check repository health."
-    echo "  -h    Display this help message."
-    echo
-    echo "By default, the script will update all Git repositories."
+ERR() {
+  PRINTF '[%S] %S\N' "$(DATE +'%H:%M:%S')" "$*" >&2
 }
 
-# Check internet connectivity
-check_internet() {
-    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Checking internet connectivity..." | tee -a "$log_file"
-    if ! ping -c 1 github.com &>/dev/null; then
-        echo "$(date '+[%Y-%m-%d %H:%M:%S]') Error: No internet connectivity. Aborting." | tee -a "$error_log"
-        exit 1
-    fi
-    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Internet connectivity is available." | tee -a "$log_file"
+LOG() {
+  PRINTF '[%S] %S\N' "$(DATE +'%H:%M:%S')" "$*" | TEE -A "$LOG_FILE"
 }
 
-# Find all directories containing a .git folder, excluding specified ones
-find_git_dirs() {
-    local repos
-    repos=$(find ~ \( "${exclude_args[@]}" \) -prune -o -type d -name ".git" -prune -exec dirname {} \;)
-
-    # Filter out directories without a remote URL
-    local valid_repos=()
-    while IFS= read -r dir; do
-        if git -C "$dir" remote get-url origin &>/dev/null; then
-            valid_repos+=("$dir")
-        else
-            echo "$(date '+[%Y-%m-%d %H:%M:%S]') Ignoring directory without remote: $dir" | tee -a "$log_file"
-        fi
-    done <<< "$repos"
-
-    # Print valid repositories
-    printf '%s\n' "${valid_repos[@]}"
+DIE() {
+  LOG "ERROR: $*"
+  EXIT 1
 }
 
-# Check repository health
-check_repo_health() {
-    local dir="$1"
-    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Checking health of repository in: $dir" | tee -a "$log_file"
+USAGE() {
+  CAT <<EOF
+GMP — GIT MULTI-PROJECT MANAGER
+  GMP           SCAN AND UPDATE ALL REPOS
+  GMP -F [DIR]  FIND REPOS, SAVE LIST
+  GMP -U        UPDATE REPOS FROM SAVED LIST (AUTO-SCANS IF MISSING)
+  GMP -L        BROWSE REPOS WITH FZF
+  GMP -R        RECOVER DELETED REPOS
+  GMP -C        CHECK REPO HEALTH
+  GMP -S        SHOW LAST-UPDATE STATS
+  GMP -Q CMD    RUN QUIETLY (LOG ONLY)
+  GMP --CLEAN   REMOVE STALE URL FILES
+  GMP -H        SHOW THIS HELP
+  GMP -V        VERSION INFO
 
-    # Check for corrupted objects
-    if ! git -C "$dir" fsck --no-progress &>/dev/null; then
-        echo "$(date '+[%Y-%m-%d %H:%M:%S]') Error: Corrupted objects found in $dir." | tee -a "$error_log"
-    fi
-
-    # Check for uncommitted changes
-    if [[ -n $(git -C "$dir" status --porcelain) ]]; then
-        echo "$(date '+[%Y-%m-%d %H:%M:%S]') Warning: Uncommitted changes in $dir." | tee -a "$log_file"
-    fi
-
-    # Check for untracked files
-    if [[ -n $(git -C "$dir" status --porcelain | grep '^??') ]]; then
-        echo "$(date '+[%Y-%m-%d %H:%M:%S]') Warning: Untracked files in $dir." | tee -a "$log_file"
-    fi
-
-    # Check for stashed changes
-    if [[ -n $(git -C "$dir" stash list) ]]; then
-        echo "$(date '+[%Y-%m-%d %H:%M:%S]') Warning: Stashed changes in $dir." | tee -a "$log_file"
-    fi
-
-    # Check for merge conflicts
-    if [[ -n $(git -C "$dir" status --porcelain | grep '^UU') ]]; then
-        echo "$(date '+[%Y-%m-%d %H:%M:%S]') Error: Unresolved merge conflicts in $dir." | tee -a "$error_log"
-    fi
-
-    # Check for detached HEAD state
-    if [[ -z $(git -C "$dir" branch --show-current) ]]; then
-        echo "$(date '+[%Y-%m-%d %H:%M:%S]') Warning: Detached HEAD state in $dir." | tee -a "$log_file"
-    fi
-
-    # Check for submodules
-    if [[ -n $(git -C "$dir" submodule status) ]]; then
-        echo "$(date '+[%Y-%m-%d %H:%M:%S]') Info: Submodules found in $dir." | tee -a "$log_file"
-    fi
+CONFIG: EDIT ROOTS ARRAY IN SCRIPT OR SET GMP_ROOTS ENV VAR
+EOF
 }
 
-# Save Git remote URLs to a file
-save_remote_urls() {
-    local dir="$1"
-    local remote_url
-    remote_url=$(git -C "$dir" remote get-url origin 2>/dev/null)
-    if [[ -n "$remote_url" ]]; then
-        echo "$dir:$remote_url" >> "$remote_urls_file"
-    else
-        echo "$(date '+[%Y-%m-%d %H:%M:%S]') Warning: No remote URL found for repository in $dir." | tee -a "$error_log"
-    fi
+VERSION() {
+  LOCAL NUM_LINES
+  NUM_LINES=$(WC -L < "$0")
+  PRINTF 'GMP V1.8 — %S LINES OF BASH\N' "$NUM_LINES"
+  PRINTF 'ROOTS: %S\N' "${ROOTS[*]}"
+  PRINTF 'LOGS:  %S\N' "$LOG_DIR"
+  PRINTF 'JOBS:  %D PARALLEL WORKERS\N' "$JOBS"
 }
 
-# Export the save_remote_urls function
-export -f save_remote_urls
+CLEANUP() {
+  RM -F -- "${TMP_FILES[@]:-}" 2>/DEV/NULL || TRUE
+}
+TRAP CLEANUP EXIT
 
-# Perform git pull in a given directory with auto-retry
-update_repo() {
-    local dir="$1"
-    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Updating repository in: $dir" | tee -a "$log_file"
-
-    if [[ ! -d "$dir" ]]; then
-        echo "$(date '+[%Y-%m-%d %H:%M:%S]') Error: Directory $dir does not exist." | tee -a "$error_log"
-        echo "$dir" >> "$failure_file"
-        return 1
-    fi
-
-    for attempt in {1..3}; do
-        {
-            cd "$dir" || return 1
-            if git pull; then
-                echo "$(date '+[%Y-%m-%d %H:%M:%S]') Successfully updated repository in: $dir" | tee -a "$log_file"
-                echo "$dir" >> "$success_file"
-                save_remote_urls "$dir"
-                return
-            else
-                echo "$(date '+[%Y-%m-%d %H:%M:%S]') Attempt $attempt failed for: $dir" | tee -a "$error_log"
-            fi
-        }
-    done
-
-    echo "$dir" >> "$failure_file"
+TMPFILE() {
+  LOCAL F
+  F=$(MKTEMP)
+  TMP_FILES+=("$F")
+  PRINTF '%S\N' "$F"
 }
 
-# Compare current scan with the previous scan to find missing directories
-highlight_missing_dirs() {
-    if [[ -f "$previous_scan_file" ]]; then
-        echo "$(date '+[%Y-%m-%d %H:%M:%S]') Checking for missing directories compared to the last scan..." | tee -a "$log_file"
-        missing_dirs=$(comm -13 <(sort "$previous_scan_file") <(sort <(find_git_dirs)))
-
-        if [[ -n "$missing_dirs" ]]; then
-            echo "$(date '+[%Y-%m-%d %H:%M:%S]') Warning: The following directories are missing compared to the last scan:" | tee -a "$log_file" "$error_log"
-            echo "$missing_dirs" | tee -a "$log_file" "$error_log"
-        else
-            echo "$(date '+[%Y-%m-%d %H:%M:%S]') No directories are missing compared to the last scan." | tee -a "$log_file"
-        fi
-    else
-        echo "$(date '+[%Y-%m-%d %H:%M:%S]') No previous scan found. Skipping missing directory check." | tee -a "$log_file"
-    fi
+ROTATE_LOG() {
+  LOCAL SIZE=0
+  IF [[ -F "$LOG_FILE" ]]; THEN
+    SIZE=$(STAT -F%Z "$LOG_FILE" 2>/DEV/NULL || STAT -C%S "$LOG_FILE" 2>/DEV/NULL || PRINTF '0')
+    IF (( SIZE > MAX_LOG_SIZE )); THEN
+      MV "$LOG_FILE" "$LOG_FILE.OLD"
+      LOG "LOG ROTATED (EXCEEDED 10MB)"
+    FI
+  FI
 }
 
-# Recover missing directories using saved remote URLs
-recover_missing_dirs() {
-    if [[ ! -f "$remote_urls_file" ]]; then
-        echo "$(date '+[%Y-%m-%d %H:%M:%S]') Error: No remote URLs file found. Cannot recover missing directories." | tee -a "$error_log"
-        exit 1
-    fi
-
-    # Get missing directories
-    missing_dirs=$(comm -13 <(sort <(find_git_dirs)) <(sort "$previous_scan_file"))
-
-    if [[ -z "$missing_dirs" ]]; then
-        echo "$(date '+[%Y-%m-%d %H:%M:%S]') No missing directories found." | tee -a "$log_file"
-        exit 0
-    fi
-
-    # Use fzf to select directories to recover
-    selected_dirs=$(echo "$missing_dirs" | fzf --multi --prompt="Select directories to recover: ")
-
-    if [[ -z "$selected_dirs" ]]; then
-        echo "$(date '+[%Y-%m-%d %H:%M:%S]') No directories selected. Aborting recovery." | tee -a "$log_file"
-        exit 0
-    fi
-
-    # Recover selected directories
-    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Recovering selected directories..." | tee -a "$log_file"
-    while IFS= read -r dir; do
-        remote_url=$(grep "^$dir:" "$remote_urls_file" | cut -d: -f2-)
-        if [[ -n "$remote_url" ]]; then
-            echo "$(date '+[%Y-%m-%d %H:%M:%S]') Cloning $remote_url into $dir..." | tee -a "$log_file"
-            if git clone "$remote_url" "$dir"; then
-                echo "$(date '+[%Y-%m-%d %H:%M:%S]') Successfully cloned $remote_url into $dir." | tee -a "$log_file"
-            else
-                echo "$(date '+[%Y-%m-%d %H:%M:%S]') Error: Failed to clone $remote_url into $dir." | tee -a "$error_log"
-            fi
-        else
-            echo "$(date '+[%Y-%m-%d %H:%M:%S]') Error: No remote URL found for $dir." | tee -a "$error_log"
-        fi
-    done <<< "$selected_dirs"
+SCAN() {
+  LOCAL DIR GITDIR
+  FOR DIR IN "${@:-${ROOTS[@]}}"; DO
+    [[ -D "$DIR" ]] || CONTINUE
+    WHILE IFS= READ -R GITDIR; DO
+      IF [[ -F "$GITDIR/CONFIG" ]] && GREP -Q '^\[REMOTE "ORIGIN"\]$' "$GITDIR/CONFIG" 2>/DEV/NULL; THEN
+        PRINTF '%S\N' "${GITDIR%/.GIT}"
+      FI
+    DONE < <(FIND "$DIR" -NAME .GIT -TYPE D -PRUNE 2>/DEV/NULL)
+  DONE
 }
 
-# Save Git remote URLs without updating repositories
-save_remote_urls_only() {
-    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Saving Git remote URLs..." | tee -a "$log_file"
-    : > "$remote_urls_file" # Clear the remote URLs file
-
-    local repos
-    repos=$(find_git_dirs)
-    if [[ -z "$repos" ]]; then
-        echo "$(date '+[%Y-%m-%d %H:%M:%S]') No Git repositories found." | tee -a "$log_file"
-        exit 0
-    fi
-
-    echo "$repos" | while IFS= read -r repo; do
-        save_remote_urls "$repo"
-    done
-
-    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Git remote URLs saved to $remote_urls_file." | tee -a "$log_file"
+URL_FILE() {
+  PRINTF '%S\N' "$URL_DIR/$1"
 }
 
-# List all Git directories using fzf
-list_dirs() {
-    local repos
-    repos=$(find_git_dirs)
-    if [[ -z "$repos" ]]; then
-        echo "$(date '+[%Y-%m-%d %H:%M:%S]') No Git repositories found." | tee -a "$log_file"
-        exit 0
-    fi
-
-    echo "$repos" | fzf --preview "eza -l --color=always {}" --prompt="Select a directory to preview: "
+SAVE_URL() {
+  LOCAL F URL
+  F=$(URL_FILE "$1")
+  [[ -F "$F" ]] && RETURN 0
+  MKDIR -P "$(DIRNAME "$F")"
+  IF URL=$(GIT -C "$1" REMOTE GET-URL ORIGIN 2>/DEV/NULL); THEN
+    PRINTF '%S\N' "$URL" > "$F"
+    RETURN 0
+  FI
+  RETURN 1
 }
 
-# Check health of all repositories
-check_all_repos_health() {
-    local repos
-    repos=$(find_git_dirs)
-    if [[ -z "$repos" ]]; then
-        echo "$(date '+[%Y-%m-%d %H:%M:%S]') No Git repositories found." | tee -a "$log_file"
-        exit 0
-    fi
+PULL_ONE() {
+  LOCAL REPO=$1
+  LOCAL BRANCH
+  BRANCH=$(GIT -C "$REPO" BRANCH --SHOW-CURRENT 2>/DEV/NULL || TRUE)
+  [[ -Z "$BRANCH" ]] && BRANCH="(DETACHED HEAD)"
+  
+  IF TIMEOUT "$PULL_TIMEOUT" GIT -C "$REPO" PULL --FF-ONLY >> "$LOG_FILE" 2>&1; THEN
+    PRINTF '[%S]   OK  %S (%S)\N' "$(DATE +'%H:%M:%S')" "$REPO" "$BRANCH" | TEE -A "$LOG_FILE"
+    SAVE_URL "$REPO" || TRUE
+    RETURN 0
+  ELSE
+    PRINTF '[%S] FAIL  %S (%S)\N' "$(DATE +'%H:%M:%S')" "$REPO" "$BRANCH" | TEE -A "$LOG_FILE"
+    RETURN 1
+  FI
+}
+EXPORT -F PULL_ONE SAVE_URL URL_FILE
+EXPORT LOG_FILE URL_DIR PULL_TIMEOUT
 
-    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Checking health of all repositories..." | tee -a "$log_file"
-    while IFS= read -r repo; do
-        check_repo_health "$repo"
-    done <<< "$repos"
+CMD_FIND() {
+  LOG "SCANNING..."
+  LOCAL TMP COUNT
+  TMP=$(TMPFILE)
+  SCAN "$@" > "$TMP"
+  COUNT=$(WC -L < "$TMP")
+  
+  IF (( COUNT == 0 )); THEN
+    LOG "NO REPOS FOUND"
+    RETURN 0
+  FI
+  
+  MV "$TMP" "$SCAN_FILE"
+  LOG "FOUND $COUNT REPOS"
+  CAT -N "$SCAN_FILE" | HEAD -50
+  IF (( COUNT > 50 )); THEN
+    PRINTF '... AND %D MORE\N' "$(( COUNT - 50 ))"
+  FI
 }
 
-# Generate summary
-summarize_results() {
-    local success_count failure_count
-    success_count=$(wc -l < "$success_file" | tr -d ' ')
-    failure_count=$(wc -l < "$failure_file" | tr -d ' ')
-
-    : > "$summary_file"
-    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Summary of Git Updates:" | tee -a "$summary_file"
-    echo "------------------------" | tee -a "$summary_file"
-    echo "Successful updates: $success_count" | tee -a "$summary_file"
-    echo "Failed updates:     $failure_count" | tee -a "$summary_file"
-
-    if [[ $success_count -gt 0 ]]; then
-        echo "Successfully updated repositories:" | tee -a "$summary_file"
-        tee -a "$summary_file" < "$success_file"
-    fi
-
-    if [[ $failure_count -gt 0 ]]; then
-        echo "Repositories that failed to update:" | tee -a "$summary_file"
-        tee -a "$summary_file" < "$failure_file"
-    fi
+CMD_UPDATE() {
+  IF [[ ! -S "$SCAN_FILE" ]]; THEN
+    LOG "NO SAVED REPOS — SCANNING ROOTS AUTOMATICALLY..."
+    CMD_FIND
+  FI
+  [[ -S "$SCAN_FILE" ]] || DIE "NO REPOS FOUND TO UPDATE"
+  
+  LOCAL TOTAL OK=0 FAIL=0 RESULTS REPO
+  TOTAL=$(WC -L < "$SCAN_FILE")
+  
+  LOG "UPDATING $TOTAL REPOS (${JOBS} PARALLEL JOBS)"
+  
+  IF (( TOTAL < 3 )); THEN
+    WHILE IFS= READ -R REPO; DO
+      IF PULL_ONE "$REPO"; THEN
+        (( OK++ ))
+      ELSE
+        (( FAIL++ ))
+      FI
+    DONE < "$SCAN_FILE"
+    LOG "DONE: $OK OK, $FAIL FAILED (OF $TOTAL)"
+  ELSE
+    RESULTS=$(TMPFILE)
+    
+    XARGS -P"$JOBS" -I{} BASH -C '
+      IF PULL_ONE "{}"; THEN PRINTF "OK\N" >&3; ELSE PRINTF "FAIL\N" >&3; FI
+    ' _ {} < "$SCAN_FILE" 3> "$RESULTS"
+    
+    OK=$(GREP -C '^OK$' "$RESULTS" 2>/DEV/NULL || TRUE)
+    FAIL=$(GREP -C '^FAIL$' "$RESULTS" 2>/DEV/NULL || TRUE)
+    
+    LOG "DONE: $OK OK, $FAIL FAILED (OF $TOTAL)"
+  FI
 }
 
-# Main script
-main() {
-    # Clear previous logs and prepare summary files
-    : > "$log_file"
-    : > "$error_log"
-    : > "$success_file"
-    : > "$failure_file"
-    : > "$remote_urls_file"
-
-    check_internet
-
-    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Searching for Git repositories..." | tee -a "$log_file"
-    local repos
-    repos=$(find_git_dirs)
-
-    if [[ -z "$repos" ]]; then
-        echo "$(date '+[%Y-%m-%d %H:%M:%S]') No Git repositories found." | tee -a "$log_file"
-        exit 0
-    fi
-
-    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Found the following Git repositories (excluding specified directories):" | tee -a "$log_file"
-    echo "$repos" | nl | tee -a "$log_file"
-
-    # Save current scan for future comparison
-    echo "$repos" > "$previous_scan_file"
-
-    # Highlight missing directories compared to the last scan
-    highlight_missing_dirs
-
-    # Export the update function and log file paths for parallel
-    export -f update_repo
-    export log_file error_log success_file failure_file remote_urls_file
-
-    # Update repositories in parallel and stream output
-    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Starting updates..." | tee -a "$log_file"
-    if ! command -v parallel &>/dev/null; then
-        echo "$(date '+[%Y-%m-%d %H:%M:%S]') Warning: GNU parallel is not installed. Running updates sequentially." | tee -a "$log_file"
-        while IFS= read -r repo; do
-            update_repo "$repo"
-        done <<< "$repos"
-    else
-        echo "$repos" | parallel -j4 update_repo
-    fi
-
-    # Summarize results
-    summarize_results
-
-    # Calculate and display total elapsed time
-    local end_time elapsed_time
-    end_time=$(date +%s)
-    elapsed_time=$((end_time - start_time))
-    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Total time taken: $((elapsed_time / 60)) minutes and $((elapsed_time % 60)) seconds." | tee -a "$summary_file" "$log_file"
-
-    echo "$(date '+[%Y-%m-%d %H:%M:%S]') Update complete. Summary and logs are saved in $log_dir."
+CMD_LIST() {
+  COMMAND -V FZF >/DEV/NULL || DIE "FZF REQUIRED"
+  SCAN "$@" | FZF --PREVIEW 'EZA -L --COLOR=ALWAYS {}' --PREVIEW-WINDOW=RIGHT:60%
 }
 
-# Handle command-line arguments
-case "$1" in
-    -r)
-        recover_missing_dirs
-        ;;
-    -s)
-        save_remote_urls_only
-        ;;
-    -l)
-        list_dirs
-        ;;
-    -c)
-        check_all_repos_health
-        ;;
-    -h)
-        display_help
-        ;;
-    *)
-        main
-        ;;
-esac
+CMD_RECOVER() {
+  COMMAND -V FZF >/DEV/NULL || DIE "FZF REQUIRED"
+  [[ -D "$URL_DIR" ]] || DIE "NO SAVED URLS — RUN GMP -F FIRST"
+  
+  LOCAL -A MISSING=()
+  LOCAL F DIR SELECTED REPO URL RECOVERED=0 FAILED=0
+  WHILE IFS= READ -R F; DO
+    DIR="${F#"$URL_DIR"}"
+    [[ -D "$DIR" ]] || MISSING+=("$DIR")
+  DONE < <(FIND "$URL_DIR" -TYPE F 2>/DEV/NULL)
+  
+  (( ${#MISSING[@]} )) || { LOG "NOTHING TO RECOVER"; RETURN 0; }
+  
+  SELECTED=$(PRINTF '%S\N' "${MISSING[@]}" | FZF -M --PROMPT='RECOVER> ')
+  [[ -N "$SELECTED" ]] || { LOG "CANCELLED"; RETURN 0; }
+  
+  WHILE IFS= READ -R REPO; DO
+    [[ -Z "$REPO" ]] && CONTINUE
+    URL=$(< "$(URL_FILE "$REPO")")
+    LOG "CLONE $URL -> $REPO"
+    MKDIR -P "$(DIRNAME "$REPO")"
+    IF GIT CLONE "$URL" "$REPO" >> "$LOG_FILE" 2>&1; THEN
+      LOG "  OK  $REPO"
+      (( RECOVERED++ ))
+    ELSE
+      LOG "FAIL  $REPO"
+      (( FAILED++ ))
+    FI
+  DONE <<< "$SELECTED"
+  
+  LOG "RECOVERED: $RECOVERED OK, $FAILED FAILED"
+}
+
+CMD_CHECK() {
+  LOCAL REPO
+  [[ -F "$SCAN_FILE" ]] || DIE "NO SAVED REPOS — RUN: GMP -F"
+  WHILE IFS= READ -R REPO; DO
+    LOG "CHECK $REPO"
+    GIT -C "$REPO" STATUS --SHORT 2>&1 | HEAD -5
+    PRINTF -- '---\N'
+  DONE < "$SCAN_FILE"
+}
+
+CMD_STATS() {
+  [[ -D "$URL_DIR" ]] || { LOG "NO SAVED REPOS"; RETURN 0; }
+  
+  LOCAL F DIR LAST COUNT=0
+  WHILE IFS= READ -R F; DO
+    DIR="${F#"$URL_DIR"}"
+    LAST=$(CD "$DIR" 2>/DEV/NULL && GIT LOG -1 --FORMAT="%AR" 2>/DEV/NULL || PRINTF 'MISSING')
+    PRINTF '%-60S %S\N' "$DIR" "$LAST"
+    (( COUNT++ ))
+  DONE < <(FIND "$URL_DIR" -TYPE F 2>/DEV/NULL)
+  
+  (( COUNT )) || LOG "NO REPOS FOUND"
+}
+
+CMD_CLEAN_URLS() {
+  [[ -D "$URL_DIR" ]] || RETURN 0
+  LOCAL CLEANED=0 F DIR
+  WHILE IFS= READ -R F; DO
+    DIR="${F#"$URL_DIR"}"
+    IF [[ ! -D "$DIR" ]]; THEN
+      RM -F -- "$F"
+      (( CLEANED++ ))
+    FI
+  DONE < <(FIND "$URL_DIR" -TYPE F 2>/DEV/NULL)
+  (( CLEANED )) && LOG "CLEANED $CLEANED STALE URLS"
+}
+
+MAIN() {
+  LOCAL ARG ARGS=()
+  
+  MKDIR -P "$LOG_DIR" "$URL_DIR"
+  
+  FOR ARG IN "$@"; DO
+    IF [[ "$ARG" == "-Q" ]]; THEN
+      QUIET=1
+    ELSE
+      ARGS+=("$ARG")
+    FI
+  DONE
+  SET -- "${ARGS[@]:-}"
+  
+  IF (( QUIET )); THEN
+    EXEC 1>/DEV/NULL
+  FI
+  
+  ROTATE_LOG
+  
+  CASE "${1:-}" IN
+    -F) SHIFT; CMD_FIND "$@" ;;
+    -U) CMD_UPDATE ;;
+    -L) SHIFT; CMD_LIST "$@" ;;
+    -R) CMD_RECOVER ;;
+    -C) CMD_CHECK ;;
+    -S) CMD_STATS ;;
+    --CLEAN) CMD_CLEAN_URLS ;;
+    -H|--HELP) USAGE ;;
+    -V|--VERSION) VERSION ;;
+    '')
+      CMD_FIND "$@"
+      CMD_UPDATE
+      ;;
+    *) DIE "UNKNOWN: $1 — TRY: GMP -H" ;;
+  ESAC
+  
+  EXIT 0
+}
+
+Main "$@"
+
