@@ -1,7 +1,7 @@
 -- ============================================
--- ~/.config/nvim/lua/tokyo-solarized.lua
+-- ~/.config/nvim/lua/current-theme.lua
 -- Tokyo Night × Solarized (Scientific Edition)
--- Auto-loading - Just require("tokyo-solarized")
+-- Auto-loading - Just require("current-theme")
 -- ============================================
 
 local M = {}
@@ -24,27 +24,6 @@ local function rgba(hex, alpha)
 		local g = tonumber(hex:sub(4, 5), 16)
 		local b = tonumber(hex:sub(6, 7), 16)
 		return string.format("#%02x%02x%02x%02x", r, g, b, math.floor(alpha * 255))
-	end
-	return hex
-end
-
--- Helper function to brighten a color
-local function brighten(hex, factor)
-	if not hex or hex == "NONE" then
-		return "NONE"
-	end
-	if hex:match("^#%x%x%x%x%x%x$") then
-		local r = tonumber(hex:sub(2, 3), 16)
-		local g = tonumber(hex:sub(4, 5), 16)
-		local b = tonumber(hex:sub(6, 7), 16)
-
-		local boost = M.config.transparent and M.config.brightness_boost or 1.0
-
-		r = math.min(255, math.floor(r * boost))
-		g = math.min(255, math.floor(g * boost))
-		b = math.min(255, math.floor(b * boost))
-
-		return string.format("#%02x%02x%02x", r, g, b)
 	end
 	return hex
 end
@@ -119,7 +98,6 @@ local function apply_theme()
 	local bg_dark = get_bg(c.bg_dark)
 	local bg_highlight = get_bg(c.bg_highlight)
 	local bg_visual = get_bg(c.bg_visual)
-	local bg_search = get_bg(c.bg_search)
 
 	-- Editor
 	vim.api.nvim_set_hl(0, "Normal", { fg = c.fg, bg = bg })
@@ -166,9 +144,9 @@ local function apply_theme()
 	vim.api.nvim_set_hl(0, "MatchParen", { fg = c.orange, bg = bg_highlight, bold = true })
 
 	-- Visual Selection
-	vim.api.nvim_set_hl(0, "Visual", { fg = c.visual_fg, bg = c.bg_visual, bold = true })
-	vim.api.nvim_set_hl(0, "VisualNOS", { fg = c.visual_fg, bg = c.bg_visual })
-	vim.api.nvim_set_hl(0, "VisualEnd", { fg = c.visual_fg, bg = c.bg_visual })
+	vim.api.nvim_set_hl(0, "Visual", { fg = c.visual_fg, bg = bg_visual, bold = true })
+	vim.api.nvim_set_hl(0, "VisualNOS", { fg = c.visual_fg, bg = bg_visual })
+	vim.api.nvim_set_hl(0, "VisualEnd", { fg = c.visual_fg, bg = bg_visual })
 
 	-- Spell
 	vim.api.nvim_set_hl(0, "SpellBad", { undercurl = true, sp = c.red })
@@ -297,15 +275,16 @@ end
 -- Apply theme immediately
 apply_theme()
 
--- Set colorscheme
-vim.cmd("colorscheme default")
+-- Set colorscheme name
+vim.g.colors_name = "tokyo-solarized"
 
--- Optional: Expose setup for re-application
-function M.setup()
-	apply_theme()
-	vim.cmd("redraw!")
-	print("🌙 Tokyo Solarized re-applied")
-end
+-- Apply theme on ColorScheme event (in case something overrides it)
+vim.api.nvim_create_autocmd("ColorScheme", {
+	callback = function()
+		apply_theme()
+	end,
+	group = vim.api.nvim_create_augroup("TokyoSolarizedAuto", { clear = true }),
+})
 
 -- Print confirmation
 print("🌙 Tokyo Solarized loaded")
