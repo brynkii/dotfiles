@@ -219,3 +219,77 @@ vim.api.nvim_create_user_command("PackClean", function(opts)
 		vim.api.nvim_exec_autocmds("User", { pattern = "PackChanged" })
 	end
 end, { bang = true, desc = "Clean inactive plugins (! to skip confirmation)" })
+
+-- ============================================
+-- Pack Keymaps
+-- ============================================
+
+-- PackAdd - Add plugins
+vim.keymap.set("n", "<leader>pa", function()
+	local repo = vim.fn.input("Plugin repo (user/repo): ")
+	if repo ~= "" then
+		vim.pack.add({ repo })
+		vim.notify("📦 Added plugin: " .. repo, vim.log.levels.INFO, { title = "Pack" })
+	end
+end, { desc = "Add plugin" })
+
+-- PackDel - Delete plugins (with selection)
+vim.keymap.set("n", "<leader>pd", function()
+	local plugins = vim.pack.get()
+	table.sort(plugins, function(a, b)
+		return a.spec.name < b.spec.name
+	end)
+
+	local names = {}
+	for _, plugin in ipairs(plugins) do
+		table.insert(names, plugin.spec.name)
+	end
+
+	if #names == 0 then
+		vim.notify("No plugins found", vim.log.levels.WARN, { title = "Pack" })
+		return
+	end
+
+	-- Use vim.ui.select for interactive selection
+	vim.ui.select(names, {
+		prompt = "Select plugins to delete (multi-select with Tab):",
+		format_item = function(name)
+			return name
+		end,
+	}, function(selected)
+		if selected then
+			vim.pack.del({ selected })
+			vim.notify("🗑️  Deleted plugin: " .. selected, vim.log.levels.INFO, { title = "Pack" })
+		end
+	end)
+end, { desc = "Delete plugin" })
+
+-- PackList - List plugins
+vim.keymap.set("n", "<leader>pl", function()
+	vim.cmd("PackList")
+end, { desc = "List plugins" })
+
+-- PackList! - List all plugins (including inactive)
+vim.keymap.set("n", "<leader>pL", function()
+	vim.cmd("PackList!")
+end, { desc = "List all plugins" })
+
+-- PackCheck - Check inactive plugins
+vim.keymap.set("n", "<leader>pc", function()
+	vim.cmd("PackCheck")
+end, { desc = "Check inactive plugins" })
+
+-- PackUpdate - Update plugins
+vim.keymap.set("n", "<leader>pu", function()
+	vim.cmd("PackUpdate")
+end, { desc = "Update all plugins" })
+
+-- PackStatus - Quick status
+vim.keymap.set("n", "<leader>ps", function()
+	vim.cmd("PackStatus")
+end, { desc = "Plugin status" })
+
+-- PackClean - Clean inactive plugins
+vim.keymap.set("n", "<leader>pC", function()
+	vim.cmd("PackClean")
+end, { desc = "Clean inactive plugins" })
