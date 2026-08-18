@@ -78,3 +78,4 @@ export PATH="$PATH:/home/brian/.lmstudio/bin"
 
 # Added by Antigravity CLI installer
 export PATH="/home/brian/.local/bin:$PATH"
+. "/home/brian/.deno/env"

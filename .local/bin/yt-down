@@ -83,6 +83,9 @@ mkdir -p "$(dirname "$LOGFILE")"
 # Collect URLs
 URLS=("$@")
 
+# cookie extraction from brave
+cookie_args="--cookies-from-browser chrome"
+
 # Download loop
 for URL in "${URLS[@]}"; do
   echo "$(date): Starting download for $URL" >> "$LOGFILE"
@@ -91,6 +94,8 @@ for URL in "${URLS[@]}"; do
     echo "\U1F3AC ${YEL}Downloading video at 720p...${NC}"
     yt-dlp --restrict-filenames \
       --progress \
+      $cookie_args \
+      --extractor-args "youtube:player_client=android,web,ios" \
       -f "bestvideo[height<=720]+bestaudio/best[height<=720]" \
       -o "$OUT_DIR/%(title)s.%(ext)s" \
       "$URL"
@@ -98,6 +103,8 @@ for URL in "${URLS[@]}"; do
     echo "\U1F3B5 ${YEL}Downloading audio with embedded thumbnail...${NC}"
     yt-dlp --restrict-filenames \
       --progress \
+      $cookie_args \
+      --extractor-args "youtube:player_client=android,web,ios" \
       -f bestaudio \
       --extract-audio \
       --audio-format "$AUDIO_FORMAT" \
