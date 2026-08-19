@@ -645,9 +645,9 @@ esac
 export PATH=/home/brian/.opencode/bin:$PATH
 
 # Pi
-export PATH="/home/brian/.asdf/installs/nodejs/23.6.0/bin:$PATH"
-
-
 # Added by Antigravity CLI installer
 export PATH="/home/brian/.local/bin:$PATH"
 . "/home/brian/.deno/env"
+
+# Pi
+export PATH="/home/brian/.asdf/installs/nodejs/26.7.0/bin:$PATH"
