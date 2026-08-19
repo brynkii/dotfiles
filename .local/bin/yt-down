@@ -1,395 +1,394 @@
 #!/usr/bin/env bash
 
-SET -EUO PIPEFAIL
+set -euo pipefail
 
-# CONFIGURATION
-READONLY LOGFILE="$HOME/.LOCAL/SHARE/DOWNLOAD-MEDIA/DOWNLOAD.LOG"
-READONLY HISTORY_FILE="$HOME/.LOCAL/SHARE/DOWNLOAD-MEDIA/DOWNLOAD_HISTORY.TSV"
-READONLY COOKIE_ARGS="--COOKIES-FROM-BROWSER CHROME"
+# Configuration
+readonly LOGFILE="$HOME/.local/share/download-media/download.log"
+readonly HISTORY_FILE="$HOME/.local/share/download-media/download_history.tsv"
+readonly COOKIE_ARGS="--cookies-from-browser chrome"
 VIDEO_QUALITY="720"
-NO_PLAYLIST=FALSE
+NO_PLAYLIST=false
 BATCH_FILE=""
-CHANNEL_MODE=FALSE
+CHANNEL_MODE=false
 OUTPUT_DIR=""
 
-# COLORS
-READONLY RED=$'\033[1;31M'
-READONLY GRN=$'\033[1;32M'
-READONLY YEL=$'\033[1;33M'
-READONLY BLU=$'\033[1;34M'
-READONLY CYN=$'\033[1;36M'
-READONLY NC=$'\033[0M'
+# Colors
+readonly RED=$'\033[1;31m'
+readonly GRN=$'\033[1;32m'
+readonly YEL=$'\033[1;33m'
+readonly BLU=$'\033[1;34m'
+readonly CYN=$'\033[1;36m'
+readonly NC=$'\033[0m'
 
-# COMMON YT-DLP ARGS
-READONLY COMMON_ARGS=(--RESTRICT-FILENAMES --PROGRESS --NO-WARNINGS)
+# Common yt-dlp args
+readonly COMMON_ARGS=(--restrict-filenames --progress --no-warnings)
 
-PRINT_HELP() {
-    CAT <<EOF
-USAGE: $(BASENAME "$0") [OPTIONS] <URL...>
+print_help() {
+    cat <<EOF
+Usage: $(basename "$0") [OPTIONS] <url...>
 
-DOWNLOAD MEDIA USING YT-DLP WITH SMART FALLBACKS.
+Download media using yt-dlp with smart fallbacks.
 
 OPTIONS:
-  --HELP                    SHOW THIS HELP
-  --HISTORY                 SHOW DOWNLOAD HISTORY
-  --VIDEO-QUALITY QUALITY   SET VIDEO QUALITY (DEFAULT: 720)
-  --NO-PLAYLIST             DOWNLOAD SINGLE VIDEO ONLY
-  --OUTPUT-DIR DIR          SPECIFY OUTPUT DIRECTORY
-  --BATCH-FILE FILE         DOWNLOAD URLS FROM FILE
-  --CHANNEL                 DOWNLOAD ENTIRE CHANNEL
+  --help                    Show this help
+  --history                 Show download history
+  --video-quality QUALITY   Set video quality (default: 720)
+  --no-playlist             Download single video only
+  --output-dir DIR          Specify output directory
+  --batch-file FILE         Download URLs from file
+  --channel                 Download entire channel
 
 EXAMPLES:
-  $(BASENAME "$0") <URL>
-  $(BASENAME "$0") --HISTORY
-  $(BASENAME "$0") --BATCH-FILE ~/URLS.TXT
-  $(BASENAME "$0") --CHANNEL <CHANNEL-URL>
+  $(basename "$0") <url>
+  $(basename "$0") --history
+  $(basename "$0") --batch-file ~/urls.txt
+  $(basename "$0") --channel <channel-url>
 EOF
 }
 
-DRAW_TABLE() {
-    LOCAL -A HEADERS=("$@")
-    LOCAL -A COL_WIDTHS=()
-    LOCAL -A ROWS=()
+draw_table() {
+    local -a headers=("$@")
+    local -a col_widths=()
+    local -a rows=()
     
-    # CALCULATE COLUMN WIDTHS BASED ON HEADERS
-    LOCAL I
-    FOR I IN "${!HEADERS[@]}"; DO
-        COL_WIDTHS[I]=${#HEADERS[$I]}
-    DONE
+    # Calculate column widths based on headers
+    local i
+    for i in "${!headers[@]}"; do
+        col_widths[i]=${#headers[$i]}
+    done
     
-    # READ DATA FROM HISTORY FILE (SKIP HEADER)
-    LOCAL LINE_NUM=0
-    WHILE IFS=$'\T' READ -R TIMESTAMP TITLE URL _ TYPE; DO
-        [[ $LINE_NUM -EQ 0 ]] && { LINE_NUM=1; CONTINUE; }  # SKIP HEADER
+    # Read data from history file (skip header)
+    local line_num=0
+    while IFS=$'\t' read -r timestamp title url _ type; do
+        [[ $line_num -eq 0 ]] && { line_num=1; continue; }  # Skip header
         
-        # STORE AS ARRAY
-        LOCAL -A FIELDS=("$TIMESTAMP" "$TITLE" "$URL" "$TYPE")
-        ROWS+=("$(PRINTF '%S\T%S\T%S\T%S' "$TIMESTAMP" "$TITLE" "$URL" "$TYPE")")
+        # Store as array
+        local -a fields=("$timestamp" "$title" "$url" "$type")
+        rows+=("$(printf '%s\t%s\t%s\t%s' "$timestamp" "$title" "$url" "$type")")
         
-        # UPDATE COLUMN WIDTHS
-        FOR I IN "${!FIELDS[@]}"; DO
-            [[ $I -GE ${#COL_WIDTHS[@]} ]] && BREAK
-            LOCAL FIELD_LEN=${#FIELDS[$I]}
-            [[ $FIELD_LEN -GT ${COL_WIDTHS[I]} ]] && COL_WIDTHS[I]=$FIELD_LEN
-        DONE
-    DONE < "$HISTORY_FILE"
+        # Update column widths
+        for i in "${!fields[@]}"; do
+            [[ $i -ge ${#col_widths[@]} ]] && break
+            local field_len=${#fields[$i]}
+            [[ $field_len -gt ${col_widths[i]} ]] && col_widths[i]=$field_len
+        done
+    done < "$HISTORY_FILE"
     
-    # ADD PADDING TO COLUMN WIDTHS
-    FOR I IN "${!COL_WIDTHS[@]}"; DO
-        COL_WIDTHS[I]=$((COL_WIDTHS[I] + 3))
-    DONE
+    # Add padding to column widths
+    for i in "${!col_widths[@]}"; do
+        col_widths[i]=$((col_widths[i] + 3))
+    done
     
-    # CREATE LINE SEPARATOR PARTS
-    LOCAL -A LINE_PARTS=()
-    LOCAL WIDTH
-    FOR WIDTH IN "${COL_WIDTHS[@]}"; DO
-        LOCAL LINE=""
-        LOCAL _
-        FOR _ IN $(SEQ 1 "$WIDTH"); DO LINE+="─"; DONE
-        LINE_PARTS+=("$LINE")
-    DONE
+    # Create line separator parts
+    local -a line_parts=()
+    local width
+    for width in "${col_widths[@]}"; do
+        local line=""
+        local _
+        for _ in $(seq 1 "$width"); do line+="─"; done
+        line_parts+=("$line")
+    done
     
-    # PRINT TOP BORDER
-    PRINTF '%S' "${BLU}┌"
-    FOR I IN "${!LINE_PARTS[@]}"; DO
-        PRINTF '%S' "${LINE_PARTS[$I]}"
-        [[ $I -LT $((${#LINE_PARTS[@]}-1)) ]] && PRINTF '%S' "┬"
-    DONE
-    PRINTF '┐%S\N' "${NC}"
+    # Print top border
+    printf '%s' "${BLU}┌"
+    for i in "${!line_parts[@]}"; do
+        printf '%s' "${line_parts[$i]}"
+        [[ $i -lt $((${#line_parts[@]}-1)) ]] && printf '%s' "┬"
+    done
+    printf '┐%s\n' "${NC}"
     
-    # PRINT HEADERS
-    PRINTF '%S' "${BLU}│${NC}"
-    FOR I IN "${!HEADERS[@]}"; DO
-        LOCAL HEADER="${HEADERS[$I]}"
-        LOCAL PADDING=$((COL_WIDTHS[I] - ${#HEADER}))
-        LOCAL LEFT_PAD=$((PADDING / 2))
-        LOCAL RIGHT_PAD=$((PADDING - LEFT_PAD))
-        PRINTF '%S' "${CYN}"
-        PRINTF '%*S%S%*S' "$LEFT_PAD" "" "$HEADER" "$RIGHT_PAD" ""
-        PRINTF '%S' "${NC}${BLU}│${NC}"
-    DONE
-    PRINTF '\N'
+    # Print headers
+    printf '%s' "${BLU}│${NC}"
+    for i in "${!headers[@]}"; do
+        local header="${headers[$i]}"
+        local padding=$((col_widths[i] - ${#header}))
+        local left_pad=$((padding / 2))
+        local right_pad=$((padding - left_pad))
+        printf '%s' "${CYN}"
+        printf '%*s%s%*s' "$left_pad" "" "$header" "$right_pad" ""
+        printf '%s' "${NC}${BLU}│${NC}"
+    done
+    printf '\n'
     
-    # PRINT SEPARATOR
-    PRINTF '%S' "${BLU}├"
-    FOR I IN "${!LINE_PARTS[@]}"; DO
-        PRINTF '%S' "${LINE_PARTS[$I]}"
-        [[ $I -LT $((${#LINE_PARTS[@]}-1)) ]] && PRINTF '%S' "┼"
-    DONE
-    PRINTF '┤%S\N' "${NC}"
+    # Print separator
+    printf '%s' "${BLU}├"
+    for i in "${!line_parts[@]}"; do
+        printf '%s' "${line_parts[$i]}"
+        [[ $i -lt $((${#line_parts[@]}-1)) ]] && printf '%s' "┼"
+    done
+    printf '┤%s\n' "${NC}"
     
-    # PRINT DATA ROWS
-    LOCAL ROW
-    FOR ROW IN "${ROWS[@]}"; DO
-        IFS=$'\T' READ -R TIMESTAMP TITLE URL TYPE <<< "$ROW"
+    # Print data rows
+    local row
+    for row in "${rows[@]}"; do
+        IFS=$'\t' read -r timestamp title url type <<< "$row"
         
-        # FORMAT FIELDS
-        LOCAL DISPLAY_DATE="${TIMESTAMP:0:16}"
-        LOCAL DISPLAY_TITLE="$TITLE"
-        LOCAL DISPLAY_URL="$URL"
+        # Format fields
+        local display_date="${timestamp:0:16}"
+        local display_title="$title"
+        local display_url="$url"
         
-        # TRUNCATE LONG FIELDS
-        IF [[ ${#DISPLAY_TITLE} -GT $((COL_WIDTHS[1]-2)) ]]; THEN
-            DISPLAY_TITLE="${DISPLAY_TITLE:0:$((COL_WIDTHS[1]-3))}…"
-        FI
-        IF [[ ${#DISPLAY_URL} -GT $((COL_WIDTHS[2]-2)) ]]; THEN
-            DISPLAY_URL="${DISPLAY_URL:0:$((COL_WIDTHS[2]-3))}…"
-        FI
+        # Truncate long fields
+        if [[ ${#display_title} -gt $((col_widths[1]-2)) ]]; then
+            display_title="${display_title:0:$((col_widths[1]-3))}…"
+        fi
+        if [[ ${#display_url} -gt $((col_widths[2]-2)) ]]; then
+            display_url="${display_url:0:$((col_widths[2]-3))}…"
+        fi
         
-        # COLOR TYPE
-        LOCAL DISPLAY_TYPE="$TYPE"
-        CASE "$TYPE" IN
-            "🎬") DISPLAY_TYPE="${GRN}VIDEO${NC}" ;;
-            "🎵") DISPLAY_TYPE="${YEL}AUDIO${NC}" ;;
-            "📝") DISPLAY_TYPE="${CYN}SUBS${NC}" ;;
-            "CHANNEL") DISPLAY_TYPE="${BLU}CHANNEL${NC}" ;;
-        ESAC
+        # Color type
+        local display_type="$type"
+        case "$type" in
+            "🎬") display_type="${GRN}Video${NC}" ;;
+            "🎵") display_type="${YEL}Audio${NC}" ;;
+            "📝") display_type="${CYN}Subs${NC}" ;;
+            "channel") display_type="${BLU}Channel${NC}" ;;
+        esac
         
-        # PRINT ROW
-        PRINTF '%S' "${BLU}│${NC}"
+        # Print row
+        printf '%s' "${BLU}│${NC}"
         
-        # DATE
-        PRINTF ' %-*S %S' "$((COL_WIDTHS[0]-2))" "$DISPLAY_DATE" "${BLU}│${NC}"
+        # Date
+        printf ' %-*s %s' "$((col_widths[0]-2))" "$display_date" "${BLU}│${NC}"
         
-        # TITLE
-        PRINTF ' %-*S %S' "$((COL_WIDTHS[1]-2))" "$DISPLAY_TITLE" "${BLU}│${NC}"
+        # Title
+        printf ' %-*s %s' "$((col_widths[1]-2))" "$display_title" "${BLU}│${NC}"
         
         # URL
-        PRINTF ' %-*S %S' "$((COL_WIDTHS[2]-2))" "$DISPLAY_URL" "${BLU}│${NC}"
+        printf ' %-*s %s' "$((col_widths[2]-2))" "$display_url" "${BLU}│${NC}"
         
-        # TYPE (WITH COLOR)
-        PRINTF ' %-*S %S' "$((COL_WIDTHS[3]-2))" "$DISPLAY_TYPE" "${BLU}│${NC}"
+        # Type (with color)
+        printf ' %-*s %s' "$((col_widths[3]-2))" "$display_type" "${BLU}│${NC}"
         
-        # STATUS
-        PRINTF ' %S  %S' "${GRN}✓${NC}" "${BLU}│${NC}"
+        # Status
+        printf ' %s  %s' "${GRN}✓${NC}" "${BLU}│${NC}"
         
-        PRINTF '\N'
-    DONE
+        printf '\n'
+    done
     
-    # PRINT BOTTOM BORDER
-    PRINTF '%S' "${BLU}└"
-    FOR I IN "${!LINE_PARTS[@]}"; DO
-        PRINTF '%S' "${LINE_PARTS[$I]}"
-        [[ $I -LT $((${#LINE_PARTS[@]}-1)) ]] && PRINTF '%S' "┴"
-    DONE
-    PRINTF '┘%S\N' "${NC}"
+    # Print bottom border
+    printf '%s' "${BLU}└"
+    for i in "${!line_parts[@]}"; do
+        printf '%s' "${line_parts[$i]}"
+        [[ $i -lt $((${#line_parts[@]}-1)) ]] && printf '%s' "┴"
+    done
+    printf '┘%s\n' "${NC}"
 }
 
-SHOW_HISTORY() {
-    [[ ! -F "$HISTORY_FILE" ]] && { ECHO "${YEL}NO HISTORY FOUND${NC}"; RETURN 0; }
-    [[ $(WC -L < "$HISTORY_FILE") -LE 1 ]] && { ECHO "${YEL}HISTORY IS EMPTY${NC}"; RETURN 0; }
+show_history() {
+    [[ ! -f "$HISTORY_FILE" ]] && { echo "${YEL}No history found${NC}"; return 0; }
+    [[ $(wc -l < "$HISTORY_FILE") -le 1 ]] && { echo "${YEL}History is empty${NC}"; return 0; }
     
-    ECHO -E "\N${CYN}  📥 DOWNLOAD HISTORY${NC}\N"
-    DRAW_TABLE "DATE" "TITLE" "URL" "TYPE" "✓"
+    echo -e "\n${CYN}  📥 Download History${NC}\n"
+    draw_table "Date" "Title" "URL" "Type" "✓"
     
-    LOCAL TOTAL=$(( $(WC -L < "$HISTORY_FILE") - 1 ))
-    ECHO -E "\N${CYN}  📊 TOTAL: ${GRN}$TOTAL DOWNLOADS${NC}"
-    ECHO -E "${BLU}  📁 $HISTORY_FILE${NC}\N"
+    local total=$(( $(wc -l < "$HISTORY_FILE") - 1 ))
+    echo -e "\n${CYN}  📊 Total: ${GRN}$total downloads${NC}"
+    echo -e "${BLU}  📁 $HISTORY_FILE${NC}\n"
 }
 
-# PARSE ARGUMENTS
-WHILE [[ $# -GT 0 ]]; DO
-    CASE "$1" IN
-        --HELP) PRINT_HELP; EXIT 0 ;;
-        --HISTORY) SHOW_HISTORY; EXIT 0 ;;
-        --VIDEO-QUALITY) VIDEO_QUALITY="${2:?}"; SHIFT 2 ;;
-        --NO-PLAYLIST) NO_PLAYLIST=TRUE; SHIFT ;;
-        --OUTPUT-DIR) OUTPUT_DIR="${2:?}"; SHIFT 2 ;;
-        --BATCH-FILE) BATCH_FILE="${2:?}"; SHIFT 2 ;;
-        --CHANNEL) CHANNEL_MODE=TRUE; SHIFT ;;
-        *) BREAK ;;
-    ESAC
-DONE
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --help) print_help; exit 0 ;;
+        --history) show_history; exit 0 ;;
+        --video-quality) VIDEO_QUALITY="${2:?}"; shift 2 ;;
+        --no-playlist) NO_PLAYLIST=true; shift ;;
+        --output-dir) OUTPUT_DIR="${2:?}"; shift 2 ;;
+        --batch-file) BATCH_FILE="${2:?}"; shift 2 ;;
+        --channel) CHANNEL_MODE=true; shift ;;
+        *) break ;;
+    esac
+done
 
-[[ $# -EQ 0 && -Z "$BATCH_FILE" ]] && { PRINT_HELP; EXIT 0; }
+[[ $# -eq 0 && -z "$BATCH_FILE" ]] && { print_help; exit 0; }
 
-# CHECK DEPENDENCIES
-FOR CMD IN YT-DLP FZF; DO
-    COMMAND -V "$CMD" &>/DEV/NULL || { ECHO "${RED}$CMD REQUIRED${NC}"; EXIT 1; }
-DONE
+# Check dependencies
+for cmd in yt-dlp fzf; do
+    command -v "$cmd" &>/dev/null || { echo "${RED}$cmd required${NC}"; exit 1; }
+done
 
-# SETUP
-MKDIR -P "$(DIRNAME "$LOGFILE")"
-[[ -F "$LOGFILE" && $(STAT -F%Z "$LOGFILE" 2>/DEV/NULL || STAT -C%S "$LOGFILE") -GT 10485760 ]] && MV "$LOGFILE" "$LOGFILE.OLD"
+# Setup
+mkdir -p "$(dirname "$LOGFILE")"
+[[ -f "$LOGFILE" && $(stat -f%z "$LOGFILE" 2>/dev/null || stat -c%s "$LOGFILE") -gt 10485760 ]] && mv "$LOGFILE" "$LOGFILE.old"
 
-LOG() { ECHO "$(DATE '+%F %T') [$1] $2" >> "$LOGFILE"; }
+log() { echo "$(date '+%F %T') [$1] $2" >> "$LOGFILE"; }
 
-RECORD_HISTORY() {
-    [[ ! -F "$HISTORY_FILE" ]] && PRINTF "TIMESTAMP\TTITLE\TURL\TFILE PATH\TTYPE\N" > "$HISTORY_FILE"
-    PRINTF "%S\T%S\T%S\T%S\T%S\N" "$(DATE '+%F %T')" "$2" "$1" "$3" "$4" >> "$HISTORY_FILE"
+record_history() {
+    [[ ! -f "$HISTORY_FILE" ]] && printf "Timestamp\tTitle\tURL\tFile Path\tType\n" > "$HISTORY_FILE"
+    printf "%s\t%s\t%s\t%s\t%s\n" "$(date '+%F %T')" "$2" "$1" "$3" "$4" >> "$HISTORY_FILE"
 }
 
-# USER INTERACTION FUNCTIONS
-SELECT_OUTPUT_DIR() {
-    [[ -N "$OUTPUT_DIR" ]] && { MKDIR -P "$OUTPUT_DIR"; ECHO "$OUTPUT_DIR"; RETURN; }
+# User interaction functions
+select_output_dir() {
+    [[ -n "$OUTPUT_DIR" ]] && { mkdir -p "$OUTPUT_DIR"; echo "$OUTPUT_DIR"; return; }
     
-    LOCAL YT_DIR="$HOME/VIDEOS/YOUTUBE"
-    MKDIR -P "$YT_DIR"
+    local yt_dir="$HOME/Videos/youtube"
+    mkdir -p "$yt_dir"
     
-    LOCAL -A DIRS=("CREATE NEW DIRECTORY" "VIDEOS ROOT" "MUSIC")
-    LOCAL DIR
-    WHILE IFS= READ -R DIR; DO
-        [[ -N "$DIR" ]] && DIRS+=("$DIR")
-    DONE < <(FIND "$YT_DIR" -MINDEPTH 1 -MAXDEPTH 1 -TYPE D 2>/DEV/NULL)
+    local -a dirs=("Create new directory" "Videos root" "Music")
+    local dir
+    while IFS= read -r dir; do
+        [[ -n "$dir" ]] && dirs+=("$dir")
+    done < <(find "$yt_dir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
     
-    LOCAL SELECTED
-    SELECTED=$(PRINTF "%S\N" "${DIRS[@]}" | FZF --PROMPT="OUTPUT DIRECTORY: ")
+    local selected
+    selected=$(printf "%s\n" "${dirs[@]}" | fzf --prompt="Output directory: ")
     
-    CASE "$SELECTED" IN
-        "CREATE NEW DIRECTORY")
-            LOCAL NAME
-            READ -RP "DIRECTORY NAME: " NAME
-            NAME="${NAME//[^A-ZA-Z0-9_-]/_}"
-            MKDIR -P "$YT_DIR/$NAME"
-            ECHO "$YT_DIR/$NAME"
+    case "$selected" in
+        "Create new directory")
+            local name
+            read -rp "Directory name: " name
+            name="${name//[^a-zA-Z0-9_-]/_}"
+            mkdir -p "$yt_dir/$name"
+            echo "$yt_dir/$name"
             ;;
-        "VIDEOS ROOT") ECHO "$YT_DIR" ;;
-        "MUSIC") ECHO "$HOME/MUSIC" ;;
-        *) ECHO "$SELECTED" ;;
-    ESAC
+        "Videos root") echo "$yt_dir" ;;
+        "Music") echo "$HOME/Music" ;;
+        *) echo "$selected" ;;
+    esac
 }
 
-SELECT_TYPE() {
-    PRINTF "%S\N" \
-        "🎬 VIDEO (${VIDEO_QUALITY}P)" \
-        "🎵 AUDIO" \
-        "📝 VIDEO WITH SUBTITLES" | \
-        FZF --PROMPT="DOWNLOAD TYPE: " | CUT -D' ' -F1
+select_type() {
+    printf "%s\n" \
+        "🎬 Video (${VIDEO_QUALITY}p)" \
+        "🎵 Audio" \
+        "📝 Video with subtitles" | \
+        fzf --prompt="Download type: " | cut -d' ' -f1
 }
 
-GET_FORMAT_ARGS() {
-    LOCAL TYPE="$1"
-    LOCAL -N ARGS_REF=$2
+get_format_args() {
+    local type="$1"
+    local -n args_ref=$2
     
-    CASE "$TYPE" IN
+    case "$type" in
         "🎬")
-            ARGS_REF=(-F "BESTVIDEO[HEIGHT<=${VIDEO_QUALITY}]+BESTAUDIO/BEST[HEIGHT<=${VIDEO_QUALITY}]" --MERGE-OUTPUT-FORMAT MP4)
+            args_ref=(-f "bestvideo[height<=${VIDEO_QUALITY}]+bestaudio/best[height<=${VIDEO_QUALITY}]" --merge-output-format mp4)
             ;;
         "🎵")
-            LOCAL FMT
-            FMT=$(PRINTF "MP3\NOPUS\NFLAC" | FZF --PROMPT="AUDIO FORMAT: ")
-            ARGS_REF=(-F "BESTAUDIO/BEST" --EXTRACT-AUDIO --AUDIO-FORMAT "$FMT" --EMBED-THUMBNAIL --ADD-METADATA)
+            local fmt
+            fmt=$(printf "mp3\nopus\nflac" | fzf --prompt="Audio format: ")
+            args_ref=(-f "bestaudio/best" --extract-audio --audio-format "$fmt" --embed-thumbnail --add-metadata)
             ;;
         "📝")
-            LOCAL LANG
-            LANG=$(PRINTF "EN\NES\NDE\NFR\NJA\NKO\NZH-CN" | FZF --PROMPT="SUBTITLE LANGUAGE: ")
-            ARGS_REF=(-F "BESTVIDEO[HEIGHT<=${VIDEO_QUALITY}]+BESTAUDIO/BEST[HEIGHT<=${VIDEO_QUALITY}]" --MERGE-OUTPUT-FORMAT MP4 --WRITE-SUBS --WRITE-AUTO-SUBS --EMBED-SUBS --SUB-LANGS "$LANG" --SUB-FORMAT "SRT/BEST")
+            local lang
+            lang=$(printf "en\nes\nde\nfr\nja\nko\nzh-CN" | fzf --prompt="Subtitle language: ")
+            args_ref=(-f "bestvideo[height<=${VIDEO_QUALITY}]+bestaudio/best[height<=${VIDEO_QUALITY}]" --merge-output-format mp4 --write-subs --write-auto-subs --embed-subs --sub-langs "$lang" --sub-format "srt/best")
             ;;
-    ESAC
+    esac
 }
 
-# DOWNLOAD FUNCTIONS
-DOWNLOAD() {
-    LOCAL URL="$1" DIR="$2" TYPE="$3"
-    LOCAL -A FORMAT_ARGS
-    GET_FORMAT_ARGS "$TYPE" FORMAT_ARGS
+# Download functions
+download() {
+    local url="$1" dir="$2" type="$3"
+    local -a format_args
+    get_format_args "$type" format_args
     
-    LOCAL TITLE
-    TITLE=$(YT-DLP --PRINT "%(TITLE)S" --SKIP-DOWNLOAD "$URL" 2>/DEV/NULL || ECHO "UNKNOWN")
-    ECHO "${BLU}TITLE: $TITLE${NC}"
+    local title
+    title=$(yt-dlp --print "%(title)s" --skip-download "$url" 2>/dev/null || echo "Unknown")
+    echo "${BLU}Title: $title${NC}"
     
-    LOCAL -A CLIENTS=(
-        "ANDROID --EXTRACTOR-ARGS YOUTUBE:PLAYER_CLIENT=ANDROID $COOKIE_ARGS"
-        "WEB --EXTRACTOR-ARGS YOUTUBE:PLAYER_CLIENT=WEB"
-        "DEFAULT "
+    local -a clients=(
+        "android --extractor-args youtube:player_client=android $COOKIE_ARGS"
+        "web --extractor-args youtube:player_client=web"
+        "default "
     )
     
-    LOCAL CLIENT
-    FOR CLIENT IN "${CLIENTS[@]}"; DO
-        LOCAL -A PARTS
-        READ -RA PARTS <<< "$CLIENT"
-        LOCAL NAME="${PARTS[0]}"
-        LOCAL -A YT_ARGS=("${COMMON_ARGS[@]}" "${FORMAT_ARGS[@]}")
+    local client
+    for client in "${clients[@]}"; do
+        local -a parts
+        read -ra parts <<< "$client"
+        local name="${parts[0]}"
+        local -a yt_args=("${COMMON_ARGS[@]}" "${format_args[@]}")
         
-        [[ ${#PARTS[@]} -GT 1 ]] && YT_ARGS+=("${PARTS[@]:1}")
-        [[ "$NO_PLAYLIST" == TRUE ]] && YT_ARGS+=(--NO-PLAYLIST)
-        YT_ARGS+=(-O "$DIR/%(TITLE)S.%(EXT)S" "$URL")
+        [[ ${#parts[@]} -gt 1 ]] && yt_args+=("${parts[@]:1}")
+        [[ "$NO_PLAYLIST" == true ]] && yt_args+=(--no-playlist)
+        yt_args+=(-o "$dir/%(title)s.%(ext)s" "$url")
         
-        [[ "$NAME" != "DEFAULT" ]] && ECHO "${YEL}CLIENT: $NAME${NC}"
+        [[ "$name" != "default" ]] && echo "${YEL}Client: $name${NC}"
         
-        IF YT-DLP "${YT_ARGS[@]}" 2>/DEV/NULL; THEN
-            RECORD_HISTORY "$URL" "$TITLE" "$DIR" "$TYPE"
-            RETURN 0
-        FI
-    DONE
-    RETURN 1
+        if yt-dlp "${yt_args[@]}" 2>/dev/null; then
+            record_history "$url" "$title" "$dir" "$type"
+            return 0
+        fi
+    done
+    return 1
 }
 
-DOWNLOAD_CHANNEL() {
-    LOCAL URL="$1" DIR="$2" TYPE="$3"
-    LOCAL -A FORMAT_ARGS
-    GET_FORMAT_ARGS "$TYPE" FORMAT_ARGS
+download_channel() {
+    local url="$1" dir="$2" type="$3"
+    local -a format_args
+    get_format_args "$type" format_args
     
-    LOCAL NAME
-    NAME=$(YT-DLP --PRINT "%(CHANNEL)S" --PLAYLIST-ITEMS 1 "$URL" 2>/DEV/NULL | SED 'S/[^A-ZA-Z0-9_-]/_/G')
-    NAME="${NAME:-CHANNEL_$(DATE +%Y%M%D)}"
-    MKDIR -P "$DIR/$NAME"
+    local name
+    name=$(yt-dlp --print "%(channel)s" --playlist-items 1 "$url" 2>/dev/null | sed 's/[^a-zA-Z0-9_-]/_/g')
+    name="${name:-channel_$(date +%Y%m%d)}"
+    mkdir -p "$dir/$name"
     
-    LOCAL -A YT_ARGS=("${COMMON_ARGS[@]}" "${FORMAT_ARGS[@]}")
-    LOCAL -A COOKIE_ARGS
-    READ -RA COOKIE_ARGS <<< "$COOKIE_ARGS"
-    YT_ARGS+=(--DOWNLOAD-ARCHIVE "$DIR/$NAME/.ARCHIVE" --MATCH-FILTER "!IS_LIVE" "${COOKIE_ARGS[@]}")
-    YT_ARGS+=(-O "$DIR/$NAME/%(UPLOAD_DATE)S_%(TITLE)S.%(EXT)S" "$URL")
+    local -a yt_args=("${COMMON_ARGS[@]}" "${format_args[@]}")
+    local -a cookie_args
+    read -ra cookie_args <<< "$COOKIE_ARGS"
+    yt_args+=(--download-archive "$dir/$name/.archive" --match-filter "!is_live" "${cookie_args[@]}")
+    yt_args+=(-o "$dir/$name/%(upload_date)s_%(title)s.%(ext)s" "$url")
     
-    YT-DLP "${YT_ARGS[@]}" && RECORD_HISTORY "$URL" "CHANNEL: $NAME" "$DIR/$NAME" "CHANNEL"
+    yt-dlp "${yt_args[@]}" && record_history "$url" "Channel: $name" "$dir/$name" "channel"
 }
 
-BATCH_DOWNLOAD() {
-    LOCAL FILE="$1" DIR="$2" TYPE="$3"
-    [[ ! -F "$FILE" ]] && { ECHO "${RED}FILE NOT FOUND: $FILE${NC}"; RETURN 1; }
+batch_download() {
+    local file="$1" dir="$2" type="$3"
+    [[ ! -f "$file" ]] && { echo "${RED}File not found: $file${NC}"; return 1; }
     
-    LOCAL -A FORMAT_ARGS
-    GET_FORMAT_ARGS "$TYPE" FORMAT_ARGS
+    local -a format_args
+    get_format_args "$type" format_args
     
-    LOCAL -A YT_ARGS=("${COMMON_ARGS[@]}" "${FORMAT_ARGS[@]}")
-    LOCAL -A COOKIE_ARGS
-    READ -RA COOKIE_ARGS <<< "$COOKIE_ARGS"
-    YT_ARGS+=(--BATCH-FILE "$FILE" --DOWNLOAD-ARCHIVE "$DIR/.ARCHIVE" --PARALLEL-DOWNLOADS 3 "${COOKIE_ARGS[@]}")
-    [[ "$NO_PLAYLIST" == TRUE ]] && YT_ARGS+=(--NO-PLAYLIST)
-    YT_ARGS+=(-O "$DIR/%(PLAYLIST_TITLE)S/%(TITLE)S.%(EXT)S")
+    local -a yt_args=("${COMMON_ARGS[@]}" "${format_args[@]}")
+    local -a cookie_args
+    read -ra cookie_args <<< "$COOKIE_ARGS"
+    yt_args+=(--batch-file "$file" --download-archive "$dir/.archive" --parallel-downloads 3 "${cookie_args[@]}")
+    [[ "$NO_PLAYLIST" == true ]] && yt_args+=(--no-playlist)
+    yt_args+=(-o "$dir/%(playlist_title)s/%(title)s.%(ext)s")
     
-    YT-DLP "${YT_ARGS[@]}" || RETURN 1
+    yt-dlp "${yt_args[@]}" || return 1
     
-    LOCAL URL
-    WHILE IFS= READ -R URL; DO
-        [[ "$URL" =~ ^HTTPS?:// ]] && RECORD_HISTORY "$URL" "BATCH" "$DIR" "$TYPE"
-    DONE < "$FILE"
+    local url
+    while IFS= read -r url; do
+        [[ "$url" =~ ^https?:// ]] && record_history "$url" "Batch" "$dir" "$type"
+    done < "$file"
 }
 
-# MAIN
-MAIN() {
-    LOCAL DIR TYPE
-    DIR=$(SELECT_OUTPUT_DIR)
-    TYPE=$(SELECT_TYPE)
-    [[ -Z "$TYPE" ]] && { ECHO "${RED}NO TYPE SELECTED${NC}"; EXIT 1; }
+# Main
+main() {
+    local dir type
+    dir=$(select_output_dir)
+    type=$(select_type)
+    [[ -z "$type" ]] && { echo "${RED}No type selected${NC}"; exit 1; }
     
-    TRAP 'ECHO -E "\N${YEL}INTERRUPTED${NC}"; EXIT 1' INT TERM
+    trap 'echo -e "\n${YEL}Interrupted${NC}"; exit 1' INT TERM
     
-    IF [[ -N "$BATCH_FILE" ]]; THEN
-        BATCH_DOWNLOAD "$BATCH_FILE" "$DIR" "$TYPE" && ECHO "${GRN}✓ COMPLETE${NC}" || ECHO "${RED}✗ FAILED${NC}"
-        RETURN
-    FI
+    if [[ -n "$BATCH_FILE" ]]; then
+        batch_download "$BATCH_FILE" "$dir" "$type" && echo "${GRN}✓ Complete${NC}" || echo "${RED}✗ Failed${NC}"
+        return
+    fi
     
-    IF [[ "$CHANNEL_MODE" == TRUE ]]; THEN
-        DOWNLOAD_CHANNEL "$1" "$DIR" "$TYPE" && ECHO "${GRN}✓ COMPLETE${NC}" || ECHO "${RED}✗ FAILED${NC}"
-        RETURN
-    FI
+    if [[ "$CHANNEL_MODE" == true ]]; then
+        download_channel "$1" "$dir" "$type" && echo "${GRN}✓ Complete${NC}" || echo "${RED}✗ Failed${NC}"
+        return
+    fi
     
-    LOCAL URL
-    FOR URL IN "$@"; DO
-        [[ "$URL" =~ ^HTTPS?:// ]] || { ECHO "${RED}INVALID URL: $URL${NC}"; CONTINUE; }
+    local url
+    for url in "$@"; do
+        [[ "$url" =~ ^https?:// ]] || { echo "${RED}Invalid URL: $url${NC}"; continue; }
         
-        LOG "INFO" "DOWNLOADING: $URL"
-        IF DOWNLOAD "$URL" "$DIR" "$TYPE"; THEN
-            LOG "SUCCESS" "DOWNLOADED: $URL"
-            ECHO "${GRN}✓ $URL${NC}"
-        ELSE
-            LOG "ERROR" "FAILED: $URL"
-            ECHO "${RED}✗ $URL${NC}"
-            ECHO "${YEL}UPDATE: PIP INSTALL --UPGRADE YT-DLP${NC}"
-        FI
-    DONE
+        log "INFO" "Downloading: $url"
+        if download "$url" "$dir" "$type"; then
+            log "SUCCESS" "Downloaded: $url"
+            echo "${GRN}✓ $url${NC}"
+        else
+            log "ERROR" "Failed: $url"
+            echo "${RED}✗ $url${NC}"
+            echo "${YEL}Update: pip install --upgrade yt-dlp${NC}"
+        fi
+    done
 }
 
-Main "$@"
-
+main "$@"
