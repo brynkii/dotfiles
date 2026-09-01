@@ -1,0 +1,1063 @@
+#!/usr/bin/env bash
+
+# vinst
+#
+# Opinionated Void Linux base installer.
+#
+# Target:
+#   x86_64 / glibc / UEFI
+#
+# Layout:
+#   GPT
+#   ├── EFI System Partition
+#   └── LUKS1
+#       └── LVM
+#           ├── root
+#           ├── home
+#           └── swap
+#
+# Installs:
+#   Void base system
+#   Linux kernel + firmware
+#   GRUB EFI
+#   LUKS + LVM
+#   doas
+#   D-Bus
+#   elogind
+#   NetworkManager
+#   Wayland
+#   Mesa / Vulkan
+#   Xwayland
+#   PipeWire + WirePlumber
+#   XDG Desktop Portal
+#
+# Deliberately does NOT install:
+#   Mango
+#   Display manager
+#   Terminal
+#   Editor
+#   Browser
+#   Launcher
+#   File manager
+#   User applications
+#
+# WARNING:
+#   This script is destructive.
+#   The selected disk will be completely erased.
+
+set -Eeuo pipefail
+
+readonly VERSION="0.1.0"
+
+readonly TARGET="/mnt"
+readonly REPO="https://repo-default.voidlinux.org/current"
+readonly ARCH="x86_64"
+
+readonly VG_NAME="voidvg"
+readonly LUKS_NAME="voidcrypt"
+
+readonly ROOT_LV="root"
+readonly HOME_LV="home"
+readonly SWAP_LV="swap"
+
+readonly ESP_SIZE="1G"
+readonly ROOT_SIZE="60G"
+readonly SWAP_SIZE="8G"
+
+DISK=""
+ESP_PART=""
+CRYPT_PART=""
+
+ROOT_DEV=""
+HOME_DEV=""
+SWAP_DEV=""
+
+HOSTNAME=""
+USERNAME=""
+FULLNAME=""
+
+TIMEZONE="UTC"
+KEYMAP="us"
+LOCALE="en_US.UTF-8"
+
+ROOT_PASSWORD=""
+USER_PASSWORD=""
+LUKS_PASSWORD=""
+
+# ----------------------------------------------------------------------
+# Appearance
+# ----------------------------------------------------------------------
+
+if [[ -t 1 ]]; then
+    readonly GREEN=$'\033[1;32m'
+    readonly RESET=$'\033[0m'
+    readonly BOLD=$'\033[1m'
+else
+    readonly GREEN=""
+    readonly RESET=""
+    readonly BOLD=""
+fi
+
+banner() {
+    printf '%s\n' "${GREEN}"
+    cat <<'EOF'
+██╗   ██╗ ██████╗ ██╗██████╗
+██║   ██║██╔═══██╗██║██╔══██╗
+██║   ██║██║   ██║██║██║  ██║
+╚██╗ ██╔╝██║   ██║██║██║  ██║
+ ╚████╔╝ ╚██████╔╝██║██████╔╝
+  ╚═══╝   ╚═════╝ ╚═╝╚══════╝
+EOF
+    printf '%s\n' "${RESET}"
+
+    printf '%s\n' "${BOLD}vinst ${VERSION} — Void Linux Base Installer${RESET}"
+    printf '\n'
+}
+
+info() {
+    printf '\n%s==> %s%s\n' "$BOLD" "$*" "$RESET"
+}
+
+ok() {
+    printf '  [ OK ] %s\n' "$*"
+}
+
+warn() {
+    printf '  [WARN] %s\n' "$*" >&2
+}
+
+die() {
+    printf '\n  [FAIL] %s\n' "$*" >&2
+    exit 1
+}
+
+# ----------------------------------------------------------------------
+# Cleanup
+# ----------------------------------------------------------------------
+
+cleanup() {
+    set +e
+
+    swapoff -a 2>/dev/null || true
+
+    if [[ -d "$TARGET" ]]; then
+        umount -R "$TARGET" 2>/dev/null || true
+    fi
+
+    if [[ -e "/dev/mapper/$VG_NAME-$ROOT_LV" ]]; then
+        lvchange -an "$ROOT_DEV" 2>/dev/null || true
+    fi
+
+    if [[ -e "/dev/mapper/$LUKS_NAME" ]]; then
+        cryptsetup close "$LUKS_NAME" 2>/dev/null || true
+    fi
+}
+
+on_interrupt() {
+    warn "Installation interrupted."
+    warn "The selected disk may contain a partially installed system."
+    cleanup
+    exit 1
+}
+
+trap on_interrupt INT TERM
+
+# ----------------------------------------------------------------------
+# Preconditions
+# ----------------------------------------------------------------------
+
+require_root() {
+    [[ "$EUID" -eq 0 ]] ||
+        die "Run this installer as root."
+}
+
+require_arch() {
+    [[ "$(uname -m)" == "x86_64" ]] ||
+        die "vinst ${VERSION} currently targets x86_64."
+}
+
+require_uefi() {
+    [[ -d /sys/firmware/efi ]] ||
+        die "vinst ${VERSION} requires a UEFI booted live environment."
+}
+
+require_commands() {
+    local commands=(
+        lsblk
+        blkid
+        wipefs
+        sfdisk
+        partprobe
+        mkfs.fat
+        mkfs.ext4
+        mkswap
+        mount
+        umount
+        swapon
+        swapoff
+        cryptsetup
+        pvcreate
+        vgcreate
+        lvcreate
+        lvs
+        vgs
+        chroot
+        xbps-install
+        xbps-reconfigure
+        grub-install
+        grub-mkconfig
+    )
+
+    local command
+
+    for command in "${commands[@]}"; do
+        command -v "$command" >/dev/null 2>&1 ||
+            die "Required command not found: $command"
+    done
+}
+
+check_network() {
+    info "Checking network"
+
+    if ! ping -c 1 -W 3 repo-default.voidlinux.org >/dev/null 2>&1; then
+        die "Cannot reach the Void repository."
+    fi
+
+    ok "Network connectivity"
+}
+
+# ----------------------------------------------------------------------
+# Disk selection
+# ----------------------------------------------------------------------
+
+list_disks() {
+    info "Available installation disks"
+
+    printf '\n'
+    printf '  %-4s %-16s %-10s %-8s %s\n' \
+        "ID" "DEVICE" "SIZE" "TRAN" "MODEL"
+
+    printf '  %-4s %-16s %-10s %-8s %s\n' \
+        "----" "----------------" "----------" "--------" "--------------------"
+
+    local id=1
+    local name size model tran rm type
+
+    while read -r name size model tran rm type; do
+        [[ "$type" == "disk" ]] || continue
+        [[ "$rm" == "0" ]] || continue
+
+        printf '  %-4s %-16s %-10s %-8s %s\n' \
+            "$id" "$name" "$size" "${tran:--}" "${model:--}"
+
+        DISK_MAP[$id]="$name"
+        ((id += 1))
+    done < <(
+        lsblk -dpno NAME,SIZE,MODEL,TRAN,RM,TYPE |
+        sed 's/[[:space:]]\+/ /g'
+    )
+
+    (( id > 1 )) ||
+        die "No suitable disks found."
+}
+
+select_disk() {
+    declare -A DISK_MAP=()
+
+    list_disks
+
+    printf '\n'
+    local choice
+
+    read -r -p "Select installation disk [1-${#DISK_MAP[@]}]: " choice
+
+    [[ "$choice" =~ ^[0-9]+$ ]] ||
+        die "Invalid disk selection."
+
+    [[ -n "${DISK_MAP[$choice]:-}" ]] ||
+        die "Invalid disk selection."
+
+    DISK="${DISK_MAP[$choice]}"
+
+    # Refuse to touch a disk that currently has mounted children.
+    if lsblk -nrpo MOUNTPOINT "$DISK" |
+        grep -qE '.+'; then
+
+        die "$DISK has mounted filesystems. Unmount them before continuing."
+    fi
+
+    # Do not permit selecting the live medium.
+    if findmnt -no SOURCE / |
+        grep -q "^$DISK"; then
+
+        die "$DISK appears to contain the running live system."
+    fi
+
+    printf '\n'
+    printf '%s\n' "Selected disk:"
+    printf '\n'
+
+    lsblk -dno NAME,SIZE,MODEL "$DISK"
+
+    printf '\n'
+    warn "EVERYTHING ON THIS DISK WILL BE DESTROYED."
+    printf '\n'
+    printf 'To continue, type the complete device path:\n'
+    printf '  %s\n\n' "$DISK"
+
+    local confirmation
+    read -r -p "> " confirmation
+
+    [[ "$confirmation" == "$DISK" ]] ||
+        die "Disk selection cancelled."
+
+    ok "Disk selected: $DISK"
+}
+
+partition_suffix() {
+    case "$DISK" in
+        /dev/nvme*|/dev/mmcblk*|/dev/loop*)
+            printf 'p'
+            ;;
+        *)
+            printf ''
+            ;;
+    esac
+}
+
+partition_disk() {
+    info "Partitioning $DISK"
+
+    local suffix
+    suffix="$(partition_suffix)"
+
+    wipefs -af "$DISK"
+
+    sfdisk --wipe always "$DISK" <<EOF
+label: gpt
+size=${ESP_SIZE}, type=uefi, name="EFI"
+type=linux, name="Void"
+EOF
+
+    partprobe "$DISK"
+    sleep 2
+
+    ESP_PART="${DISK}${suffix}1"
+    CRYPT_PART="${DISK}${suffix}2"
+
+    [[ -b "$ESP_PART" ]] ||
+        die "EFI partition was not created."
+
+    [[ -b "$CRYPT_PART" ]] ||
+        die "Linux partition was not created."
+
+    ok "GPT partition table created"
+    ok "EFI:   $ESP_PART"
+    ok "LUKS:  $CRYPT_PART"
+}
+
+# ----------------------------------------------------------------------
+# Password input
+# ----------------------------------------------------------------------
+
+prompt_password() {
+    local label="$1"
+    local first
+    local second
+
+    while true; do
+        printf '\n%s\n' "$label"
+
+        read -r -s -p "Password: " first
+        printf '\n'
+
+        read -r -s -p "Confirm:  " second
+        printf '\n'
+
+        [[ -n "$first" ]] ||
+            die "Password may not be empty."
+
+        if [[ "$first" == "$second" ]]; then
+            printf '%s' "$first"
+            return
+        fi
+
+        warn "Passwords do not match."
+    done
+}
+
+collect_configuration() {
+    info "System configuration"
+
+    read -r -p "Hostname: " HOSTNAME
+    [[ "$HOSTNAME" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]] ||
+        die "Invalid hostname."
+
+    read -r -p "Username: " USERNAME
+    [[ "$USERNAME" =~ ^[a-z_][a-z0-9_-]*$ ]] ||
+        die "Invalid username."
+
+    read -r -p "Full name: " FULLNAME
+
+    read -r -p "Timezone [$TIMEZONE]: " value
+    [[ -n "$value" ]] && TIMEZONE="$value"
+
+    read -r -p "Keyboard [$KEYMAP]: " value
+    [[ -n "$value" ]] && KEYMAP="$value"
+
+    read -r -p "Locale [$LOCALE]: " value
+    [[ -n "$value" ]] && LOCALE="$value"
+
+    [[ -f "/usr/share/zoneinfo/$TIMEZONE" ]] ||
+        die "Timezone does not exist: $TIMEZONE"
+
+    ROOT_PASSWORD="$(prompt_password "Root password")"
+    USER_PASSWORD="$(prompt_password "User password")"
+    LUKS_PASSWORD="$(prompt_password "Disk encryption password")"
+
+    unset value
+}
+
+# ----------------------------------------------------------------------
+# Encryption and LVM
+# ----------------------------------------------------------------------
+
+create_encryption() {
+    info "Creating encrypted volume"
+
+    # Void's FDE documentation currently recommends LUKS1 for
+    # GRUB compatibility.
+    printf '%s\n' "$LUKS_PASSWORD" |
+        cryptsetup luksFormat \
+            --type luks1 \
+            --batch-mode \
+            --key-file=- \
+            "$CRYPT_PART"
+
+    printf '%s\n' "$LUKS_PASSWORD" |
+        cryptsetup luksOpen \
+            --key-file=- \
+            "$CRYPT_PART" \
+            "$LUKS_NAME"
+
+    ok "LUKS volume created"
+}
+
+create_lvm() {
+    info "Creating LVM volumes"
+
+    pvcreate "/dev/mapper/$LUKS_NAME"
+    vgcreate "$VG_NAME" "/dev/mapper/$LUKS_NAME"
+
+    lvcreate \
+        --yes \
+        --name "$ROOT_LV" \
+        --size "$ROOT_SIZE" \
+        "$VG_NAME"
+
+    lvcreate \
+        --yes \
+        --name "$SWAP_LV" \
+        --size "$SWAP_SIZE" \
+        "$VG_NAME"
+
+    # Everything left goes to /home.
+    lvcreate \
+        --yes \
+        --name "$HOME_LV" \
+        --extents 100%FREE \
+        "$VG_NAME"
+
+    ROOT_DEV="/dev/$VG_NAME/$ROOT_LV"
+    HOME_DEV="/dev/$VG_NAME/$HOME_LV"
+    SWAP_DEV="/dev/$VG_NAME/$SWAP_LV"
+
+    ok "LVM volume group: $VG_NAME"
+    ok "Root LV: $ROOT_SIZE"
+    ok "Swap LV: $SWAP_SIZE"
+    ok "Home LV: remaining space"
+}
+
+format_filesystems() {
+    info "Creating filesystems"
+
+    mkfs.fat \
+        -F 32 \
+        -n EFI \
+        "$ESP_PART"
+
+    mkfs.ext4 \
+        -F \
+        -L root \
+        "$ROOT_DEV"
+
+    mkfs.ext4 \
+        -F \
+        -L home \
+        "$HOME_DEV"
+
+    mkswap \
+        -L swap \
+        "$SWAP_DEV"
+
+    ok "EFI formatted as FAT32"
+    ok "Root formatted as ext4"
+    ok "Home formatted as ext4"
+    ok "Swap initialized"
+}
+
+mount_target() {
+    info "Mounting target filesystem"
+
+    mkdir -p "$TARGET"
+
+    mount "$ROOT_DEV" "$TARGET"
+
+    mkdir -p "$TARGET/home"
+    mount "$HOME_DEV" "$TARGET/home"
+
+    mkdir -p "$TARGET/boot/efi"
+    mount "$ESP_PART" "$TARGET/boot/efi"
+
+    swapon "$SWAP_DEV"
+
+    ok "Root mounted"
+    ok "Home mounted"
+    ok "EFI mounted"
+}
+
+# ----------------------------------------------------------------------
+# Void bootstrap
+# ----------------------------------------------------------------------
+
+copy_xbps_keys() {
+    mkdir -p "$TARGET/var/db/xbps/keys"
+
+    cp -a \
+        /var/db/xbps/keys/. \
+        "$TARGET/var/db/xbps/keys/"
+}
+
+bootstrap_void() {
+    info "Bootstrapping Void Linux"
+
+    copy_xbps_keys
+
+    XBPS_ARCH="$ARCH" \
+        xbps-install \
+            -S \
+            -r "$TARGET" \
+            -R "$REPO" \
+            base-system \
+            linux \
+            linux-firmware \
+            cryptsetup \
+            lvm2 \
+            grub-x86_64-efi \
+            efibootmgr \
+            doas \
+            dbus \
+            elogind \
+            NetworkManager \
+            wayland \
+            wayland-protocols \
+            mesa \
+            mesa-dri \
+            vulkan-loader \
+            xorg-server-xwayland \
+            pipewire \
+            alsa-pipewire \
+            wireplumber \
+            xdg-desktop-portal \
+            xdg-desktop-portal-gtk
+
+    ok "Void base system installed"
+}
+
+# ----------------------------------------------------------------------
+# Chroot environment
+# ----------------------------------------------------------------------
+
+prepare_chroot() {
+    info "Preparing chroot"
+
+    for directory in dev proc sys run; do
+        mkdir -p "$TARGET/$directory"
+
+        mount --rbind \
+            "/$directory" \
+            "$TARGET/$directory"
+
+        mount --make-rslave \
+            "$TARGET/$directory"
+    done
+
+    # Void's chroot documentation recommends making DNS available
+    # inside the target when network access from the chroot is needed.
+    if [[ -e /etc/resolv.conf ]]; then
+        cp -L \
+            /etc/resolv.conf \
+            "$TARGET/etc/resolv.conf"
+    fi
+
+    ok "Chroot environment ready"
+}
+
+chroot_run() {
+    chroot "$TARGET" /bin/bash -c "$*"
+}
+
+# ----------------------------------------------------------------------
+# Basic system configuration
+# ----------------------------------------------------------------------
+
+configure_hostname() {
+    printf '%s\n' "$HOSTNAME" > "$TARGET/etc/hostname"
+}
+
+configure_timezone() {
+    ln -sf \
+        "/usr/share/zoneinfo/$TIMEZONE" \
+        "$TARGET/etc/localtime"
+}
+
+configure_keyboard() {
+    cat > "$TARGET/etc/vconsole.conf" <<EOF
+KEYMAP=$KEYMAP
+EOF
+}
+
+configure_locale() {
+    cat > "$TARGET/etc/locale.conf" <<EOF
+LANG=$LOCALE
+EOF
+
+    cat > "$TARGET/etc/default/libc-locales" <<EOF
+# Generated by vinst.
+$LOCALE UTF-8
+EOF
+}
+
+configure_fstab() {
+    info "Writing filesystem table"
+
+    local root_uuid
+    local home_uuid
+    local swap_uuid
+    local esp_uuid
+
+    root_uuid="$(blkid -s UUID -o value "$ROOT_DEV")"
+    home_uuid="$(blkid -s UUID -o value "$HOME_DEV")"
+    swap_uuid="$(blkid -s UUID -o value "$SWAP_DEV")"
+    esp_uuid="$(blkid -s UUID -o value "$ESP_PART")"
+
+    cat > "$TARGET/etc/fstab" <<EOF
+# Generated by vinst ${VERSION}
+
+UUID=$root_uuid  /          ext4  defaults,noatime  0 1
+UUID=$home_uuid  /home      ext4  defaults,noatime  0 2
+UUID=$swap_uuid  none       swap  defaults          0 0
+UUID=$esp_uuid   /boot/efi  vfat  defaults,noatime  0 2
+EOF
+}
+
+configure_crypttab() {
+    info "Configuring encrypted root"
+
+    local luks_uuid
+    luks_uuid="$(blkid -s UUID -o value "$CRYPT_PART")"
+
+    cat > "$TARGET/etc/crypttab" <<EOF
+$LUKS_NAME UUID=$luks_uuid /boot/volume.key luks
+EOF
+
+    cat > "$TARGET/etc/default/grub" <<EOF
+GRUB_DEFAULT=0
+GRUB_TIMEOUT=5
+GRUB_DISTRIBUTOR="Void"
+
+GRUB_ENABLE_CRYPTODISK=y
+
+GRUB_CMDLINE_LINUX_DEFAULT="rd.luks.uuid=$luks_uuid rd.lvm.vg=$VG_NAME"
+EOF
+}
+
+# ----------------------------------------------------------------------
+# LUKS boot key
+# ----------------------------------------------------------------------
+
+configure_luks_key() {
+    info "Creating boot-time LUKS key"
+
+    local keyfile="$TARGET/boot/volume.key"
+
+    umask 077
+
+    dd \
+        if=/dev/urandom \
+        of="$keyfile" \
+        bs=64 \
+        count=1 \
+        status=none
+
+    chmod 000 "$keyfile"
+
+    # The existing LUKS passphrase authenticates us.
+    # The generated key is added as another keyslot.
+    printf '%s\n' "$LUKS_PASSWORD" |
+        cryptsetup luksAddKey \
+            --key-file=- \
+            --new-keyfile="$keyfile" \
+            "$CRYPT_PART"
+
+    cat > "$TARGET/etc/dracut.conf.d/10-vinst-crypt.conf" <<'EOF'
+install_items+=" /boot/volume.key /etc/crypttab "
+EOF
+
+    # Protect /boot contents from group/other access.
+    chmod 700 "$TARGET/boot"
+
+    ok "Boot-time LUKS key configured"
+}
+
+# ----------------------------------------------------------------------
+# User and privilege configuration
+# ----------------------------------------------------------------------
+
+set_password() {
+    local account="$1"
+    local password="$2"
+
+    printf '%s:%s\n' "$account" "$password" |
+        chroot "$TARGET" chpasswd
+}
+
+configure_users() {
+    info "Creating user account"
+
+    chroot_run "
+        useradd \
+            --create-home \
+            --user-group \
+            --groups wheel,network,audio,video,input \
+            --comment '$FULLNAME' \
+            '$USERNAME'
+    "
+
+    set_password root "$ROOT_PASSWORD"
+    set_password "$USERNAME" "$USER_PASSWORD"
+
+    cat > "$TARGET/etc/doas.conf" <<EOF
+permit persist :wheel
+EOF
+
+    chmod 0400 "$TARGET/etc/doas.conf"
+
+    ok "Root password configured"
+    ok "User account created: $USERNAME"
+    ok "doas configured for wheel"
+}
+
+# ----------------------------------------------------------------------
+# Services
+# ----------------------------------------------------------------------
+
+enable_service() {
+    local service="$1"
+
+    [[ -d "$TARGET/etc/sv/$service" ]] ||
+        die "Service does not exist: $service"
+
+    ln -sfn \
+        "/etc/sv/$service" \
+        "$TARGET/var/service/$service"
+}
+
+disable_service() {
+    local service="$1"
+
+    rm -f \
+        "$TARGET/var/service/$service"
+}
+
+configure_services() {
+    info "Configuring runit services"
+
+    mkdir -p "$TARGET/var/service"
+
+    # NetworkManager must not compete with other network managers.
+    disable_service dhcpcd
+    disable_service wpa_supplicant
+    disable_service wicd
+
+    enable_service dbus
+    enable_service elogind
+    enable_service NetworkManager
+
+    # PipeWire is intentionally NOT enabled as a runit system service.
+    # Void documents PipeWire as a per-user/session service.
+    ok "D-Bus enabled"
+    ok "elogind enabled"
+    ok "NetworkManager enabled"
+    ok "PipeWire left as a user-session service"
+}
+
+# ----------------------------------------------------------------------
+# PipeWire
+# ----------------------------------------------------------------------
+
+configure_pipewire() {
+    info "Configuring PipeWire"
+
+    mkdir -p \
+        "$TARGET/etc/pipewire/pipewire.conf.d" \
+        "$TARGET/etc/alsa/conf.d"
+
+    ln -sfn \
+        /usr/share/examples/wireplumber/10-wireplumber.conf \
+        "$TARGET/etc/pipewire/pipewire.conf.d/10-wireplumber.conf"
+
+    ln -sfn \
+        /usr/share/examples/pipewire/20-pipewire-pulse.conf \
+        "$TARGET/etc/pipewire/pipewire.conf.d/20-pipewire-pulse.conf"
+
+    ln -sfn \
+        /usr/share/alsa/alsa.conf.d/50-pipewire.conf \
+        "$TARGET/etc/alsa/conf.d/50-pipewire.conf"
+
+    ln -sfn \
+        /usr/share/alsa/alsa.conf.d/99-pipewire-default.conf \
+        "$TARGET/etc/alsa/conf.d/99-pipewire-default.conf"
+
+    ok "WirePlumber configured"
+    ok "PipeWire PulseAudio compatibility configured"
+    ok "ALSA PipeWire compatibility configured"
+}
+
+# ----------------------------------------------------------------------
+# GRUB / initramfs
+# ----------------------------------------------------------------------
+
+install_grub() {
+    info "Installing GRUB"
+
+    # efivarfs should normally already be mounted by the live UEFI
+    # environment. Mount it explicitly if necessary.
+    if [[ -d /sys/firmware/efi/efivars ]] &&
+       ! mountpoint -q /sys/firmware/efi/efivars; then
+
+        mount -t efivarfs \
+            none \
+            /sys/firmware/efi/efivars 2>/dev/null || true
+    fi
+
+    if [[ -d "$TARGET/sys/firmware/efi/efivars" ]]; then
+        :
+    else
+        mkdir -p "$TARGET/sys/firmware/efi/efivars"
+    fi
+
+    chroot_run "
+        grub-install \
+            --target=x86_64-efi \
+            --efi-directory=/boot/efi \
+            --bootloader-id=Void \
+            --recheck
+    "
+
+    ok "GRUB installed"
+}
+
+finalize_system() {
+    info "Generating initramfs and GRUB configuration"
+
+    chroot_run \
+        "xbps-reconfigure -fa"
+
+    ok "Initramfs generated"
+    ok "GRUB configuration generated"
+}
+
+# ----------------------------------------------------------------------
+# Validation
+# ----------------------------------------------------------------------
+
+validate_installation() {
+    info "Validating installation"
+
+    local required_files=(
+        "$TARGET/etc/fstab"
+        "$TARGET/etc/crypttab"
+        "$TARGET/etc/hostname"
+        "$TARGET/etc/doas.conf"
+        "$TARGET/etc/default/grub"
+        "$TARGET/etc/dracut.conf.d/10-vinst-crypt.conf"
+        "$TARGET/boot/volume.key"
+        "$TARGET/boot/grub/grub.cfg"
+    )
+
+    local file
+
+    for file in "${required_files[@]}"; do
+        [[ -e "$file" ]] ||
+            die "Missing: $file"
+    done
+
+    [[ -d "$TARGET/boot/efi/EFI/Void" ]] ||
+        die "GRUB EFI installation is missing."
+
+    [[ -L "$TARGET/var/service/dbus" ]] ||
+        die "D-Bus service is not enabled."
+
+    [[ -L "$TARGET/var/service/elogind" ]] ||
+        die "elogind service is not enabled."
+
+    [[ -L "$TARGET/var/service/NetworkManager" ]] ||
+        die "NetworkManager service is not enabled."
+
+    [[ ! -L "$TARGET/var/service/dhcpcd" ]] ||
+        die "dhcpcd must not be enabled with NetworkManager."
+
+    [[ ! -L "$TARGET/var/service/wpa_supplicant" ]] ||
+        die "wpa_supplicant must not be enabled with NetworkManager."
+
+    ok "Filesystem configuration"
+    ok "Encryption configuration"
+    ok "GRUB configuration"
+    ok "runit services"
+    ok "PipeWire configuration"
+
+    info "LUKS metadata"
+
+    cryptsetup luksDump "$CRYPT_PART" |
+        grep -q "Version:        1" ||
+        die "Expected LUKS1 volume."
+
+    ok "LUKS1 confirmed"
+}
+
+# ----------------------------------------------------------------------
+# Summary
+# ----------------------------------------------------------------------
+
+show_summary() {
+    printf '\n'
+    printf '%s\n' "============================================================"
+    printf '%s\n' " Installation complete"
+    printf '%s\n' "============================================================"
+    printf '\n'
+
+    printf '  Version:       %s\n' "$VERSION"
+    printf '  Disk:          %s\n' "$DISK"
+    printf '  Hostname:      %s\n' "$HOSTNAME"
+    printf '  User:          %s\n' "$USERNAME"
+    printf '  Timezone:      %s\n' "$TIMEZONE"
+    printf '  Locale:        %s\n' "$LOCALE"
+    printf '\n'
+
+    printf '%s\n' "  Storage:"
+    printf '    EFI:         %s\n' "$ESP_PART"
+    printf '    LUKS:        %s\n' "$CRYPT_PART"
+    printf '    LVM:         %s\n' "$VG_NAME"
+    printf '    Root:        %s\n' "$ROOT_DEV"
+    printf '    Home:        %s\n' "$HOME_DEV"
+    printf '    Swap:        %s\n' "$SWAP_DEV"
+    printf '\n'
+
+    printf '%s\n' "  Foundation:"
+    printf '    UEFI / GPT\n'
+    printf '    LUKS1 + LVM\n'
+    printf '    ext4 / ext4\n'
+    printf '    GRUB\n'
+    printf '    runit\n'
+    printf '    NetworkManager\n'
+    printf '    D-Bus + elogind\n'
+    printf '    Wayland + Mesa + Vulkan\n'
+    printf '    Xwayland\n'
+    printf '    PipeWire + WirePlumber\n'
+    printf '    XDG Desktop Portal\n'
+    printf '\n'
+
+    printf '%s\n' "  Deliberately not installed:"
+    printf '    Mango\n'
+    printf '    Display manager\n'
+    printf '    Desktop applications\n'
+    printf '    User configuration\n'
+    printf '\n'
+
+    printf '%s\n' "============================================================"
+    printf '\n'
+
+    printf '%s\n' "After reboot:"
+    printf '\n'
+    printf '    xbps-install -Su\n'
+    printf '\n'
+    printf 'Then configure NetworkManager with:\n'
+    printf '\n'
+    printf '    nmtui\n'
+    printf '\n'
+
+    warn "Back up the LUKS recovery/passphrase information."
+    warn "The EFI System Partition is intentionally unencrypted."
+}
+
+# ----------------------------------------------------------------------
+# Main
+# ----------------------------------------------------------------------
+
+main() {
+    banner
+
+    require_root
+    require_arch
+    require_uefi
+    require_commands
+
+    ok "Running as root"
+    ok "Architecture: x86_64"
+    ok "Boot mode: UEFI"
+
+    check_network
+
+    collect_configuration
+    select_disk
+
+    partition_disk
+    create_encryption
+    create_lvm
+    format_filesystems
+    mount_target
+
+    bootstrap_void
+    prepare_chroot
+
+    configure_hostname
+    configure_timezone
+    configure_keyboard
+    configure_locale
+    configure_fstab
+    configure_crypttab
+
+    configure_luks_key
+    configure_users
+    configure_services
+    configure_pipewire
+
+    install_grub
+    finalize_system
+
+    validate_installation
+
+    show_summary
+
+    printf '\n'
+    info "Unmounting target"
+
+    cleanup
+
+    printf '\n'
+    printf '%sInstallation finished successfully.%s\n' "$BOLD" "$RESET"
+    printf '\n'
+}
+
+main "$@"
