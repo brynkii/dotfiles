@@ -263,7 +263,7 @@ get_format_args() {
     
     case "$type" in
         "🎬")
-            args_ref=(-f "bestvideo[height<=${VIDEO_QUALITY}]+bestaudio/best[height<=${VIDEO_QUALITY}]" --merge-output-format mp4)
+            args_ref=(-f "bestvideo[height<=${VIDEO_QUALITY}][ext=webm]+bestaudio[ext=webm]/best[height<=${VIDEO_QUALITY}][ext=webm]" --merge-output-format webm)
             ;;
         "🎵")
             local fmt
@@ -273,7 +273,7 @@ get_format_args() {
         "📝")
             local lang
             lang=$(printf "en\nes\nde\nfr\nja\nko\nzh-CN" | fzf --prompt="Subtitle language: ")
-            args_ref=(-f "bestvideo[height<=${VIDEO_QUALITY}]+bestaudio/best[height<=${VIDEO_QUALITY}]" --merge-output-format mp4 --write-subs --write-auto-subs --embed-subs --sub-langs "$lang" --sub-format "srt/best")
+            args_ref=(-f "bestvideo[height<=${VIDEO_QUALITY}][ext=webm]+bestaudio[ext=webm]/best[height<=${VIDEO_QUALITY}][ext=webm]" --merge-output-format webm --write-subs --write-auto-subs --embed-subs --sub-langs "$lang" --sub-format "srt/best")
             ;;
     esac
 }

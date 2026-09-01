@@ -1,0 +1,656 @@
+#!/usr/bin/env bash
+
+# vinst - minimal reproducible Void Linux installer
+#
+# Scope:
+#   - Void Linux base system
+#   - UEFI/GPT or BIOS/MBR
+#   - ext4 root + optional separate /home
+#   - kernel, firmware and CPU microcode
+#   - networking
+#   - D-Bus + elogind
+#   - GPU / Wayland foundation
+#   - PipeWire + WirePlumber
+#   - xdg-desktop-portal
+#   - GRUB
+#
+# Deliberately NOT included:
+#   - Mango
+#   - desktop applications
+#   - terminal/editor/launcher
+#   - shell customization
+#   - user application configuration
+#
+# WARNING:
+#   This script is destructive. The selected disk will be repartitioned.
+
+set -Eeuo pipefail
+
+readonly VERSION="5.0"
+readonly TARGET="/mnt"
+readonly REPO="https://repo-default.voidlinux.org/current"
+
+DISK=""
+HOSTNAME=""
+USERNAME=""
+USER_FULLNAME=""
+TIMEZONE="UTC"
+KEYMAP="us"
+LOCALE="en_US.UTF-8"
+
+ROOT_PASSWORD=""
+USER_PASSWORD=""
+
+SEPARATE_HOME="yes"
+BOOT_MODE=""
+
+ROOT_PART=""
+HOME_PART=""
+ESP_PART=""
+
+cleanup() {
+    sync || true
+
+    if mountpoint -q "${TARGET}/boot/efi"; then
+        umount "${TARGET}/boot/efi" || true
+    fi
+
+    if mountpoint -q "${TARGET}/home"; then
+        umount "${TARGET}/home" || true
+    fi
+
+    if mountpoint -q "${TARGET}"; then
+        umount -R "${TARGET}" || true
+    fi
+}
+
+die() {
+    printf '\nERROR: %s\n' "$*" >&2
+    exit 1
+}
+
+trap 'printf "\nInstallation interrupted.\n" >&2' INT TERM
+
+require_root() {
+    [[ $EUID -eq 0 ]] || die "Run this installer as root."
+}
+
+require_commands() {
+    local cmd
+
+    for cmd in \
+        lsblk \
+        blkid \
+        wipefs \
+        sfdisk \
+        mkfs.ext4 \
+        mkfs.fat \
+        mount \
+        umount \
+        chroot \
+        xbps-install \
+        ip \
+        ping \
+        grub-install
+    do
+        command -v "$cmd" >/dev/null 2>&1 || \
+            die "Required command not found: $cmd"
+    done
+}
+
+detect_boot_mode() {
+    if [[ -d /sys/firmware/efi ]]; then
+        BOOT_MODE="uefi"
+    else
+        BOOT_MODE="bios"
+    fi
+
+    printf 'Boot mode: %s\n' "$BOOT_MODE"
+}
+
+check_network() {
+    printf 'Checking network connectivity...\n'
+
+    if ! ping -c 1 -W 3 repo-default.voidlinux.org >/dev/null 2>&1; then
+        die "Network connectivity is unavailable."
+    fi
+}
+
+show_disks() {
+    printf '\nAvailable disks:\n\n'
+    lsblk -e7 -o NAME,SIZE,TYPE,MODEL,FSTYPE,MOUNTPOINTS
+    printf '\n'
+}
+
+select_disk() {
+    read -r -p "Installation disk (example: /dev/nvme0n1): " DISK
+
+    [[ -b "$DISK" ]] || die "Not a valid block device: $DISK"
+
+    [[ "$(lsblk -dn -o TYPE "$DISK")" == "disk" ]] ||
+        die "$DISK is not a whole disk."
+
+    printf '\nSelected disk:\n'
+    lsblk -dn -o NAME,SIZE,MODEL "$DISK"
+
+    printf '\nWARNING: ALL DATA ON THIS DISK WILL BE DESTROYED.\n'
+    printf 'Type exactly:\n\n'
+    printf 'ERASE %s\n\n' "$DISK"
+
+    local confirmation
+    read -r -p "> " confirmation
+
+    [[ "$confirmation" == "ERASE $DISK" ]] ||
+        die "Destructive operation cancelled."
+}
+
+collect_basic_config() {
+    printf '\nSystem configuration\n\n'
+
+    read -r -p "Hostname: " HOSTNAME
+    [[ "$HOSTNAME" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]] ||
+        die "Invalid hostname."
+
+    read -r -p "Username: " USERNAME
+    [[ "$USERNAME" =~ ^[a-z_][a-z0-9_-]*$ ]] ||
+        die "Invalid username."
+
+    read -r -p "Full name: " USER_FULLNAME
+
+    read -r -p "Timezone [${TIMEZONE}]: " input
+    [[ -n "$input" ]] && TIMEZONE="$input"
+
+    read -r -p "Keyboard layout [${KEYMAP}]: " input
+    [[ -n "$input" ]] && KEYMAP="$input"
+
+    read -r -p "Locale [${LOCALE}]: " input
+    [[ -n "$input" ]] && LOCALE="$input"
+
+    printf '\nSeparate /home partition? [Y/n]: '
+    read -r input
+
+    if [[ "$input" =~ ^[Nn]$ ]]; then
+        SEPARATE_HOME="no"
+    else
+        SEPARATE_HOME="yes"
+    fi
+
+    printf '\nRoot password:\n'
+    read -r -s ROOT_PASSWORD
+    printf '\nRepeat root password:\n'
+    local root_password2
+    read -r -s root_password2
+    printf '\n'
+
+    [[ "$ROOT_PASSWORD" == "$root_password2" ]] ||
+        die "Root passwords do not match."
+
+    printf '\nUser password:\n'
+    read -r -s USER_PASSWORD
+    printf '\nRepeat user password:\n'
+    local user_password2
+    read -r -s user_password2
+    printf '\n'
+
+    [[ "$USER_PASSWORD" == "$user_password2" ]] ||
+        die "User passwords do not match."
+}
+
+partition_suffix() {
+    case "$DISK" in
+        *nvme*|*mmcblk*)
+            printf 'p'
+            ;;
+        *)
+            printf ''
+            ;;
+    esac
+}
+
+partition_disk() {
+    local pfx
+    pfx="$(partition_suffix)"
+
+    printf '\nPartitioning %s...\n' "$DISK"
+
+    wipefs -af "$DISK"
+
+    if [[ "$BOOT_MODE" == "uefi" ]]; then
+
+        sfdisk "$DISK" <<EOF
+label: gpt
+size=1G, type=uefi
+type=linux
+type=linux
+EOF
+
+        ESP_PART="${DISK}${pfx}1"
+        ROOT_PART="${DISK}${pfx}2"
+
+        if [[ "$SEPARATE_HOME" == "yes" ]]; then
+            HOME_PART="${DISK}${pfx}3"
+        fi
+
+    else
+
+        sfdisk "$DISK" <<EOF
+label: dos
+type=83
+type=83
+EOF
+
+        ROOT_PART="${DISK}${pfx}1"
+
+        if [[ "$SEPARATE_HOME" == "yes" ]]; then
+            HOME_PART="${DISK}${pfx}2"
+        fi
+    fi
+
+    partprobe "$DISK" || true
+    sleep 2
+}
+
+format_filesystems() {
+    printf '\nFormatting filesystems...\n'
+
+    if [[ "$BOOT_MODE" == "uefi" ]]; then
+        mkfs.fat -F 32 "$ESP_PART"
+    fi
+
+    mkfs.ext4 -F "$ROOT_PART"
+
+    if [[ "$SEPARATE_HOME" == "yes" ]]; then
+        mkfs.ext4 -F "$HOME_PART"
+    fi
+}
+
+mount_filesystems() {
+    printf '\nMounting filesystems...\n'
+
+    mkdir -p "$TARGET"
+
+    mount "$ROOT_PART" "$TARGET"
+
+    if [[ "$SEPARATE_HOME" == "yes" ]]; then
+        mkdir -p "$TARGET/home"
+        mount "$HOME_PART" "$TARGET/home"
+    fi
+
+    if [[ "$BOOT_MODE" == "uefi" ]]; then
+        mkdir -p "$TARGET/boot/efi"
+        mount "$ESP_PART" "$TARGET/boot/efi"
+    fi
+}
+
+copy_xbps_keys() {
+    mkdir -p "$TARGET/var/db/xbps/keys"
+
+    cp -a /var/db/xbps/keys/. \
+        "$TARGET/var/db/xbps/keys/"
+}
+
+bootstrap_void() {
+    printf '\nBootstrapping Void Linux...\n'
+
+    copy_xbps_keys
+
+    XBPS_ARCH=x86_64 \
+        xbps-install \
+        -S \
+        -r "$TARGET" \
+        -R "$REPO" \
+        base-system
+}
+
+write_fstab() {
+    printf '\nCreating /etc/fstab...\n'
+
+    local root_uuid
+    root_uuid="$(blkid -s UUID -o value "$ROOT_PART")"
+
+    {
+        printf '# Generated by vinst %s\n\n' "$VERSION"
+
+        printf 'UUID=%s / ext4 defaults,noatime 0 1\n' "$root_uuid"
+
+        if [[ "$SEPARATE_HOME" == "yes" ]]; then
+            local home_uuid
+            home_uuid="$(blkid -s UUID -o value "$HOME_PART")"
+            printf 'UUID=%s /home ext4 defaults,noatime 0 2\n' "$home_uuid"
+        fi
+
+        if [[ "$BOOT_MODE" == "uefi" ]]; then
+            local esp_uuid
+            esp_uuid="$(blkid -s UUID -o value "$ESP_PART")"
+            printf 'UUID=%s /boot/efi vfat defaults,noatime 0 2\n' "$esp_uuid"
+        fi
+    } > "$TARGET/etc/fstab"
+}
+
+write_system_config() {
+    printf '\nConfiguring system...\n'
+
+    printf '%s\n' "$HOSTNAME" > "$TARGET/etc/hostname"
+
+    ln -sf \
+        "/usr/share/zoneinfo/$TIMEZONE" \
+        "$TARGET/etc/localtime"
+
+    mkdir -p "$TARGET/etc"
+
+    cat > "$TARGET/etc/vconsole.conf" <<EOF
+KEYMAP=$KEYMAP
+EOF
+
+    cat > "$TARGET/etc/locale.conf" <<EOF
+LANG=$LOCALE
+EOF
+}
+
+configure_locales() {
+    if [[ -f "$TARGET/etc/default/libc-locales" ]]; then
+        sed -i \
+            "s/^#\(${LOCALE//./\\.}\)/\1/" \
+            "$TARGET/etc/default/libc-locales" || true
+    fi
+}
+
+write_rc_conf() {
+    cat > "$TARGET/etc/rc.conf" <<EOF
+# Generated by vinst.
+#
+# Void runit configuration.
+EOF
+}
+
+detect_cpu_microcode() {
+    if grep -q 'GenuineIntel' /proc/cpuinfo; then
+        printf 'intel-ucode'
+    elif grep -q 'AuthenticAMD' /proc/cpuinfo; then
+        printf 'amd-ucode'
+    else
+        printf ''
+    fi
+}
+
+detect_gpu_packages() {
+    local packages=""
+    local gpu
+
+    gpu="$(lspci -nn 2>/dev/null || true)"
+
+    if grep -qi 'Intel.*VGA\|Intel.*Display' <<< "$gpu"; then
+        packages+=" mesa-dri mesa-vulkan-intel"
+    fi
+
+    if grep -qi 'AMD.*VGA\|AMD.*Display\|ATI.*VGA\|ATI.*Display' <<< "$gpu"; then
+        packages+=" mesa-dri mesa-vulkan-radeon"
+    fi
+
+    if grep -qi 'NVIDIA.*VGA\|NVIDIA.*3D\|NVIDIA.*Display' <<< "$gpu"; then
+        packages+=" mesa-dri"
+    fi
+
+    printf '%s' "$packages"
+}
+
+install_base_packages() {
+    printf '\nInstalling system foundation...\n'
+
+    local microcode
+    microcode="$(detect_cpu_microcode)"
+
+    local gpu
+    gpu="$(detect_gpu_packages)"
+
+    local packages="
+        linux
+        linux-firmware
+        grub
+        grub-x86_64-efi
+        efibootmgr
+        doas
+        dbus
+        elogind
+        dhcpcd
+        wpa_supplicant
+        wayland
+        wayland-protocols
+        libinput
+        mesa
+        mesa-dri
+        vulkan-loader
+        xorg-server-xwayland
+        pipewire
+        wireplumber
+        alsa-pipewire
+        xdg-desktop-portal
+        xdg-desktop-portal-gtk
+        xdg-desktop-portal-wlr
+        $microcode
+        $gpu
+    "
+
+    if [[ "$BOOT_MODE" == "bios" ]]; then
+        packages="
+            linux
+            linux-firmware
+            grub
+            doas
+            dbus
+            elogind
+            dhcpcd
+            wpa_supplicant
+            wayland
+            wayland-protocols
+            libinput
+            mesa
+            mesa-dri
+            vulkan-loader
+            xorg-server-xwayland
+            pipewire
+            wireplumber
+            alsa-pipewire
+            xdg-desktop-portal
+            xdg-desktop-portal-gtk
+            xdg-desktop-portal-wlr
+            $microcode
+            $gpu
+        "
+    fi
+
+    chroot "$TARGET" /usr/bin/env \
+        XBPS_ARCH=x86_64 \
+        xbps-install -Suy
+
+    chroot "$TARGET" /usr/bin/env \
+        XBPS_ARCH=x86_64 \
+        xbps-install -y $packages
+}
+
+configure_user() {
+    printf '\nCreating user account...\n'
+
+    chroot "$TARGET" /bin/bash <<EOF
+set -e
+
+useradd \
+    -m \
+    -U \
+    -G wheel,audio,video,input \
+    -c "$USER_FULLNAME" \
+    "$USERNAME"
+
+printf '%s:%s\n' root '$ROOT_PASSWORD' | chpasswd
+printf '%s:%s\n' '$USERNAME' '$USER_PASSWORD' | chpasswd
+
+passwd -l root || true
+EOF
+
+    cat > "$TARGET/etc/doas.conf" <<EOF
+permit persist :wheel
+EOF
+
+    chmod 0400 "$TARGET/etc/doas.conf"
+}
+
+enable_services() {
+    printf '\nEnabling required services...\n'
+
+    mkdir -p "$TARGET/var/service"
+
+    # Networking.
+    ln -sf /etc/sv/dhcpcd "$TARGET/var/service/dhcpcd"
+
+    # D-Bus.
+    ln -sf /etc/sv/dbus "$TARGET/var/service/dbus"
+
+    # elogind.
+    ln -sf /etc/sv/elogind "$TARGET/var/service/elogind"
+}
+
+install_bootloader() {
+    printf '\nInstalling bootloader...\n'
+
+    if [[ "$BOOT_MODE" == "uefi" ]]; then
+        chroot "$TARGET" grub-install \
+            --target=x86_64-efi \
+            --efi-directory=/boot/efi \
+            --bootloader-id=Void \
+            --recheck \
+            "$DISK"
+    else
+        chroot "$TARGET" grub-install \
+            --target=i386-pc \
+            --recheck \
+            "$DISK"
+    fi
+}
+
+finalize_system() {
+    printf '\nFinalizing Void installation...\n'
+
+    chroot "$TARGET" xbps-reconfigure -fa
+
+    chroot "$TARGET" xbps-install -S
+
+    chroot "$TARGET" grub-mkconfig -o /boot/grub/grub.cfg
+}
+
+validate_installation() {
+    printf '\nValidating installation...\n'
+
+    [[ -f "$TARGET/etc/fstab" ]] ||
+        die "fstab was not generated."
+
+    [[ -f "$TARGET/etc/hostname" ]] ||
+        die "hostname was not configured."
+
+    [[ -x "$TARGET/sbin/init" ]] ||
+        die "Void init system is missing."
+
+    [[ -d "$TARGET/var/db/xbps" ]] ||
+        die "XBPS database is missing."
+
+    [[ -f "$TARGET/boot/grub/grub.cfg" ]] ||
+        die "GRUB configuration was not generated."
+
+    if [[ "$BOOT_MODE" == "uefi" ]]; then
+        [[ -d "$TARGET/boot/efi/EFI" ]] ||
+            die "UEFI bootloader files were not installed."
+    fi
+
+    printf 'Validation passed.\n'
+}
+
+show_summary() {
+    cat <<EOF
+
+========================================
+ Void installation complete
+========================================
+
+Version:       $VERSION
+Boot mode:     $BOOT_MODE
+Disk:          $DISK
+Root:          $ROOT_PART
+Home:          ${HOME_PART:-same filesystem as root}
+Hostname:      $HOSTNAME
+User:          $USERNAME
+Timezone:      $TIMEZONE
+Locale:        $LOCALE
+Keyboard:      $KEYMAP
+
+Installed foundation:
+  - Void base-system
+  - Linux kernel
+  - firmware
+  - CPU microcode
+  - GRUB
+  - doas
+  - dhcpcd
+  - wpa_supplicant
+  - D-Bus
+  - elogind
+  - Wayland foundation
+  - Xwayland
+  - Mesa / Vulkan
+  - PipeWire
+  - WirePlumber
+  - ALSA PipeWire integration
+  - xdg-desktop-portal
+  - GTK portal backend
+  - wlroots portal backend
+
+Not installed:
+  - Mango
+  - desktop applications
+  - terminal
+  - launcher
+  - notification daemon
+  - user configuration
+
+The system is ready for reboot.
+
+After reboot, update the system with:
+
+    xbps-install -Su
+
+Then we can build Mango separately.
+
+========================================
+
+EOF
+}
+
+main() {
+    require_root
+    require_commands
+    detect_boot_mode
+    check_network
+
+    show_disks
+    select_disk
+    collect_basic_config
+
+    partition_disk
+    format_filesystems
+    mount_filesystems
+
+    bootstrap_void
+    write_fstab
+    write_system_config
+    configure_locales
+    write_rc_conf
+
+    install_base_packages
+    configure_user
+    enable_services
+    install_bootloader
+    finalize_system
+    validate_installation
+
+    show_summary
+}
+
+main "$@"
