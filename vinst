@@ -1,656 +1,638 @@
-#!/usr/bin/env bash
-
-# vinst - minimal reproducible Void Linux installer
-#
-# Scope:
-#   - Void Linux base system
-#   - UEFI/GPT or BIOS/MBR
-#   - ext4 root + optional separate /home
-#   - kernel, firmware and CPU microcode
-#   - networking
-#   - D-Bus + elogind
-#   - GPU / Wayland foundation
-#   - PipeWire + WirePlumber
-#   - xdg-desktop-portal
-#   - GRUB
-#
-# Deliberately NOT included:
-#   - Mango
-#   - desktop applications
-#   - terminal/editor/launcher
-#   - shell customization
-#   - user application configuration
-#
-# WARNING:
-#   This script is destructive. The selected disk will be repartitioned.
-
-set -Eeuo pipefail
-
-readonly VERSION="5.0"
-readonly TARGET="/mnt"
-readonly REPO="https://repo-default.voidlinux.org/current"
-
-DISK=""
-HOSTNAME=""
-USERNAME=""
-USER_FULLNAME=""
-TIMEZONE="UTC"
-KEYMAP="us"
-LOCALE="en_US.UTF-8"
-
-ROOT_PASSWORD=""
-USER_PASSWORD=""
-
-SEPARATE_HOME="yes"
-BOOT_MODE=""
-
-ROOT_PART=""
-HOME_PART=""
-ESP_PART=""
-
-cleanup() {
-    sync || true
-
-    if mountpoint -q "${TARGET}/boot/efi"; then
-        umount "${TARGET}/boot/efi" || true
-    fi
-
-    if mountpoint -q "${TARGET}/home"; then
-        umount "${TARGET}/home" || true
-    fi
-
-    if mountpoint -q "${TARGET}"; then
-        umount -R "${TARGET}" || true
-    fi
-}
-
-die() {
-    printf '\nERROR: %s\n' "$*" >&2
-    exit 1
-}
-
-trap 'printf "\nInstallation interrupted.\n" >&2' INT TERM
-
-require_root() {
-    [[ $EUID -eq 0 ]] || die "Run this installer as root."
-}
-
-require_commands() {
-    local cmd
-
-    for cmd in \
-        lsblk \
-        blkid \
-        wipefs \
-        sfdisk \
-        mkfs.ext4 \
-        mkfs.fat \
-        mount \
-        umount \
-        chroot \
-        xbps-install \
-        ip \
-        ping \
-        grub-install
-    do
-        command -v "$cmd" >/dev/null 2>&1 || \
-            die "Required command not found: $cmd"
-    done
-}
-
-detect_boot_mode() {
-    if [[ -d /sys/firmware/efi ]]; then
-        BOOT_MODE="uefi"
-    else
-        BOOT_MODE="bios"
-    fi
-
-    printf 'Boot mode: %s\n' "$BOOT_MODE"
-}
-
-check_network() {
-    printf 'Checking network connectivity...\n'
-
-    if ! ping -c 1 -W 3 repo-default.voidlinux.org >/dev/null 2>&1; then
-        die "Network connectivity is unavailable."
-    fi
-}
-
-show_disks() {
-    printf '\nAvailable disks:\n\n'
-    lsblk -e7 -o NAME,SIZE,TYPE,MODEL,FSTYPE,MOUNTPOINTS
-    printf '\n'
-}
-
-select_disk() {
-    read -r -p "Installation disk (example: /dev/nvme0n1): " DISK
-
-    [[ -b "$DISK" ]] || die "Not a valid block device: $DISK"
-
-    [[ "$(lsblk -dn -o TYPE "$DISK")" == "disk" ]] ||
-        die "$DISK is not a whole disk."
-
-    printf '\nSelected disk:\n'
-    lsblk -dn -o NAME,SIZE,MODEL "$DISK"
-
-    printf '\nWARNING: ALL DATA ON THIS DISK WILL BE DESTROYED.\n'
-    printf 'Type exactly:\n\n'
-    printf 'ERASE %s\n\n' "$DISK"
-
-    local confirmation
-    read -r -p "> " confirmation
-
-    [[ "$confirmation" == "ERASE $DISK" ]] ||
-        die "Destructive operation cancelled."
-}
-
-collect_basic_config() {
-    printf '\nSystem configuration\n\n'
+Phase 0 — Verify what we already have
 
-    read -r -p "Hostname: " HOSTNAME
-    [[ "$HOSTNAME" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]] ||
-        die "Invalid hostname."
+Before changing anything, let's take inventory.
 
-    read -r -p "Username: " USERNAME
-    [[ "$USERNAME" =~ ^[a-z_][a-z0-9_-]*$ ]] ||
-        die "Invalid username."
+As root:
 
-    read -r -p "Full name: " USER_FULLNAME
-
-    read -r -p "Timezone [${TIMEZONE}]: " input
-    [[ -n "$input" ]] && TIMEZONE="$input"
+xbps-query -l | grep -E 'dbus|wpa_supplicant|dhcpcd|NetworkManager|seatd|turnstile'
 
-    read -r -p "Keyboard layout [${KEYMAP}]: " input
-    [[ -n "$input" ]] && KEYMAP="$input"
+Then:
 
-    read -r -p "Locale [${LOCALE}]: " input
-    [[ -n "$input" ]] && LOCALE="$input"
+sv status dbus
+sv status wpa_supplicant
+sv status dhcpcd
+sv status NetworkManager
+sv status seatd
+sv status turnstiled
 
-    printf '\nSeparate /home partition? [Y/n]: '
-    read -r input
+Some of those may simply say the service doesn't exist. That's fine.
 
-    if [[ "$input" =~ ^[Nn]$ ]]; then
-        SEPARATE_HOME="no"
-    else
-        SEPARATE_HOME="yes"
-    fi
+Also:
 
-    printf '\nRoot password:\n'
-    read -r -s ROOT_PASSWORD
-    printf '\nRepeat root password:\n'
-    local root_password2
-    read -r -s root_password2
-    printf '\n'
+lsblk -f
+lsblk --discard
+cat /etc/fstab
 
-    [[ "$ROOT_PASSWORD" == "$root_password2" ]] ||
-        die "Root passwords do not match."
+And:
 
-    printf '\nUser password:\n'
-    read -r -s USER_PASSWORD
-    printf '\nRepeat user password:\n'
-    local user_password2
-    read -r -s user_password2
-    printf '\n'
+uname -a
+cat /etc/os-release
 
-    [[ "$USER_PASSWORD" == "$user_password2" ]] ||
-        die "User passwords do not match."
-}
+This gives us a clean snapshot before we modify things.
 
-partition_suffix() {
-    case "$DISK" in
-        *nvme*|*mmcblk*)
-            printf 'p'
-            ;;
-        *)
-            printf ''
-            ;;
-    esac
-}
+Phase 1 — Update the base system
 
-partition_disk() {
-    local pfx
-    pfx="$(partition_suffix)"
+This should always be first.
 
-    printf '\nPartitioning %s...\n' "$DISK"
+xbps-install -S
+xbps-install -Su
 
-    wipefs -af "$DISK"
+Void's installation documentation explicitly recommends doing a system update immediately after the first boot.
 
-    if [[ "$BOOT_MODE" == "uefi" ]]; then
+Then:
 
-        sfdisk "$DISK" <<EOF
-label: gpt
-size=1G, type=uefi
-type=linux
-type=linux
-EOF
+xbps-install -Su
 
-        ESP_PART="${DISK}${pfx}1"
-        ROOT_PART="${DISK}${pfx}2"
+until there's nothing left to update.
 
-        if [[ "$SEPARATE_HOME" == "yes" ]]; then
-            HOME_PART="${DISK}${pfx}3"
-        fi
+Phase 2 — D-Bus
 
-    else
+Yes, we should install D-Bus now.
 
-        sfdisk "$DISK" <<EOF
-label: dos
-type=83
-type=83
-EOF
+Not because Mango itself necessarily needs us to build our whole system around D-Bus, but because it becomes useful/necessary for several pieces we're going to use later.
 
-        ROOT_PART="${DISK}${pfx}1"
+Install:
 
-        if [[ "$SEPARATE_HOME" == "yes" ]]; then
-            HOME_PART="${DISK}${pfx}2"
-        fi
-    fi
+doas xbps-install -S dbus
 
-    partprobe "$DISK" || true
-    sleep 2
-}
+Enable it:
 
-format_filesystems() {
-    printf '\nFormatting filesystems...\n'
+doas ln -s /etc/sv/dbus /var/service/
 
-    if [[ "$BOOT_MODE" == "uefi" ]]; then
-        mkfs.fat -F 32 "$ESP_PART"
-    fi
+Check:
 
-    mkfs.ext4 -F "$ROOT_PART"
+sv status dbus
 
-    if [[ "$SEPARATE_HOME" == "yes" ]]; then
-        mkfs.ext4 -F "$HOME_PART"
-    fi
-}
-
-mount_filesystems() {
-    printf '\nMounting filesystems...\n'
-
-    mkdir -p "$TARGET"
-
-    mount "$ROOT_PART" "$TARGET"
-
-    if [[ "$SEPARATE_HOME" == "yes" ]]; then
-        mkdir -p "$TARGET/home"
-        mount "$HOME_PART" "$TARGET/home"
-    fi
-
-    if [[ "$BOOT_MODE" == "uefi" ]]; then
-        mkdir -p "$TARGET/boot/efi"
-        mount "$ESP_PART" "$TARGET/boot/efi"
-    fi
-}
-
-copy_xbps_keys() {
-    mkdir -p "$TARGET/var/db/xbps/keys"
-
-    cp -a /var/db/xbps/keys/. \
-        "$TARGET/var/db/xbps/keys/"
-}
-
-bootstrap_void() {
-    printf '\nBootstrapping Void Linux...\n'
-
-    copy_xbps_keys
-
-    XBPS_ARCH=x86_64 \
-        xbps-install \
-        -S \
-        -r "$TARGET" \
-        -R "$REPO" \
-        base-system
-}
-
-write_fstab() {
-    printf '\nCreating /etc/fstab...\n'
-
-    local root_uuid
-    root_uuid="$(blkid -s UUID -o value "$ROOT_PART")"
-
-    {
-        printf '# Generated by vinst %s\n\n' "$VERSION"
-
-        printf 'UUID=%s / ext4 defaults,noatime 0 1\n' "$root_uuid"
-
-        if [[ "$SEPARATE_HOME" == "yes" ]]; then
-            local home_uuid
-            home_uuid="$(blkid -s UUID -o value "$HOME_PART")"
-            printf 'UUID=%s /home ext4 defaults,noatime 0 2\n' "$home_uuid"
-        fi
-
-        if [[ "$BOOT_MODE" == "uefi" ]]; then
-            local esp_uuid
-            esp_uuid="$(blkid -s UUID -o value "$ESP_PART")"
-            printf 'UUID=%s /boot/efi vfat defaults,noatime 0 2\n' "$esp_uuid"
-        fi
-    } > "$TARGET/etc/fstab"
-}
-
-write_system_config() {
-    printf '\nConfiguring system...\n'
-
-    printf '%s\n' "$HOSTNAME" > "$TARGET/etc/hostname"
-
-    ln -sf \
-        "/usr/share/zoneinfo/$TIMEZONE" \
-        "$TARGET/etc/localtime"
-
-    mkdir -p "$TARGET/etc"
-
-    cat > "$TARGET/etc/vconsole.conf" <<EOF
-KEYMAP=$KEYMAP
-EOF
-
-    cat > "$TARGET/etc/locale.conf" <<EOF
-LANG=$LOCALE
-EOF
-}
-
-configure_locales() {
-    if [[ -f "$TARGET/etc/default/libc-locales" ]]; then
-        sed -i \
-            "s/^#\(${LOCALE//./\\.}\)/\1/" \
-            "$TARGET/etc/default/libc-locales" || true
-    fi
-}
-
-write_rc_conf() {
-    cat > "$TARGET/etc/rc.conf" <<EOF
-# Generated by vinst.
-#
-# Void runit configuration.
-EOF
-}
-
-detect_cpu_microcode() {
-    if grep -q 'GenuineIntel' /proc/cpuinfo; then
-        printf 'intel-ucode'
-    elif grep -q 'AuthenticAMD' /proc/cpuinfo; then
-        printf 'amd-ucode'
-    else
-        printf ''
-    fi
-}
-
-detect_gpu_packages() {
-    local packages=""
-    local gpu
-
-    gpu="$(lspci -nn 2>/dev/null || true)"
-
-    if grep -qi 'Intel.*VGA\|Intel.*Display' <<< "$gpu"; then
-        packages+=" mesa-dri mesa-vulkan-intel"
-    fi
-
-    if grep -qi 'AMD.*VGA\|AMD.*Display\|ATI.*VGA\|ATI.*Display' <<< "$gpu"; then
-        packages+=" mesa-dri mesa-vulkan-radeon"
-    fi
-
-    if grep -qi 'NVIDIA.*VGA\|NVIDIA.*3D\|NVIDIA.*Display' <<< "$gpu"; then
-        packages+=" mesa-dri"
-    fi
-
-    printf '%s' "$packages"
-}
-
-install_base_packages() {
-    printf '\nInstalling system foundation...\n'
-
-    local microcode
-    microcode="$(detect_cpu_microcode)"
-
-    local gpu
-    gpu="$(detect_gpu_packages)"
-
-    local packages="
-        linux
-        linux-firmware
-        grub
-        grub-x86_64-efi
-        efibootmgr
-        doas
-        dbus
-        elogind
-        dhcpcd
-        wpa_supplicant
-        wayland
-        wayland-protocols
-        libinput
-        mesa
-        mesa-dri
-        vulkan-loader
-        xorg-server-xwayland
-        pipewire
-        wireplumber
-        alsa-pipewire
-        xdg-desktop-portal
-        xdg-desktop-portal-gtk
-        xdg-desktop-portal-wlr
-        $microcode
-        $gpu
-    "
-
-    if [[ "$BOOT_MODE" == "bios" ]]; then
-        packages="
-            linux
-            linux-firmware
-            grub
-            doas
-            dbus
-            elogind
-            dhcpcd
-            wpa_supplicant
-            wayland
-            wayland-protocols
-            libinput
-            mesa
-            mesa-dri
-            vulkan-loader
-            xorg-server-xwayland
-            pipewire
-            wireplumber
-            alsa-pipewire
-            xdg-desktop-portal
-            xdg-desktop-portal-gtk
-            xdg-desktop-portal-wlr
-            $microcode
-            $gpu
-        "
-    fi
-
-    chroot "$TARGET" /usr/bin/env \
-        XBPS_ARCH=x86_64 \
-        xbps-install -Suy
-
-    chroot "$TARGET" /usr/bin/env \
-        XBPS_ARCH=x86_64 \
-        xbps-install -y $packages
-}
-
-configure_user() {
-    printf '\nCreating user account...\n'
-
-    chroot "$TARGET" /bin/bash <<EOF
-set -e
-
-useradd \
-    -m \
-    -U \
-    -G wheel,audio,video,input \
-    -c "$USER_FULLNAME" \
-    "$USERNAME"
-
-printf '%s:%s\n' root '$ROOT_PASSWORD' | chpasswd
-printf '%s:%s\n' '$USERNAME' '$USER_PASSWORD' | chpasswd
-
-passwd -l root || true
-EOF
-
-    cat > "$TARGET/etc/doas.conf" <<EOF
-permit persist :wheel
-EOF
-
-    chmod 0400 "$TARGET/etc/doas.conf"
-}
-
-enable_services() {
-    printf '\nEnabling required services...\n'
-
-    mkdir -p "$TARGET/var/service"
-
-    # Networking.
-    ln -sf /etc/sv/dhcpcd "$TARGET/var/service/dhcpcd"
-
-    # D-Bus.
-    ln -sf /etc/sv/dbus "$TARGET/var/service/dbus"
-
-    # elogind.
-    ln -sf /etc/sv/elogind "$TARGET/var/service/elogind"
-}
-
-install_bootloader() {
-    printf '\nInstalling bootloader...\n'
-
-    if [[ "$BOOT_MODE" == "uefi" ]]; then
-        chroot "$TARGET" grub-install \
-            --target=x86_64-efi \
-            --efi-directory=/boot/efi \
-            --bootloader-id=Void \
-            --recheck \
-            "$DISK"
-    else
-        chroot "$TARGET" grub-install \
-            --target=i386-pc \
-            --recheck \
-            "$DISK"
-    fi
-}
-
-finalize_system() {
-    printf '\nFinalizing Void installation...\n'
-
-    chroot "$TARGET" xbps-reconfigure -fa
-
-    chroot "$TARGET" xbps-install -S
-
-    chroot "$TARGET" grub-mkconfig -o /boot/grub/grub.cfg
-}
-
-validate_installation() {
-    printf '\nValidating installation...\n'
-
-    [[ -f "$TARGET/etc/fstab" ]] ||
-        die "fstab was not generated."
-
-    [[ -f "$TARGET/etc/hostname" ]] ||
-        die "hostname was not configured."
-
-    [[ -x "$TARGET/sbin/init" ]] ||
-        die "Void init system is missing."
-
-    [[ -d "$TARGET/var/db/xbps" ]] ||
-        die "XBPS database is missing."
-
-    [[ -f "$TARGET/boot/grub/grub.cfg" ]] ||
-        die "GRUB configuration was not generated."
-
-    if [[ "$BOOT_MODE" == "uefi" ]]; then
-        [[ -d "$TARGET/boot/efi/EFI" ]] ||
-            die "UEFI bootloader files were not installed."
-    fi
-
-    printf 'Validation passed.\n'
-}
-
-show_summary() {
-    cat <<EOF
-
-========================================
- Void installation complete
-========================================
-
-Version:       $VERSION
-Boot mode:     $BOOT_MODE
-Disk:          $DISK
-Root:          $ROOT_PART
-Home:          ${HOME_PART:-same filesystem as root}
-Hostname:      $HOSTNAME
-User:          $USERNAME
-Timezone:      $TIMEZONE
-Locale:        $LOCALE
-Keyboard:      $KEYMAP
-
-Installed foundation:
-  - Void base-system
-  - Linux kernel
-  - firmware
-  - CPU microcode
-  - GRUB
-  - doas
-  - dhcpcd
-  - wpa_supplicant
-  - D-Bus
-  - elogind
-  - Wayland foundation
-  - Xwayland
-  - Mesa / Vulkan
-  - PipeWire
-  - WirePlumber
-  - ALSA PipeWire integration
-  - xdg-desktop-portal
-  - GTK portal backend
-  - wlroots portal backend
-
-Not installed:
-  - Mango
-  - desktop applications
-  - terminal
-  - launcher
-  - notification daemon
-  - user configuration
-
-The system is ready for reboot.
-
-After reboot, update the system with:
-
-    xbps-install -Su
-
-Then we can build Mango separately.
-
-========================================
-
-EOF
-}
-
-main() {
-    require_root
-    require_commands
-    detect_boot_mode
-    check_network
-
-    show_disks
-    select_disk
-    collect_basic_config
-
-    partition_disk
-    format_filesystems
-    mount_filesystems
-
-    bootstrap_void
-    write_fstab
-    write_system_config
-    configure_locales
-    write_rc_conf
-
-    install_base_packages
-    configure_user
-    enable_services
-    install_bootloader
-    finalize_system
-    validate_installation
-
-    show_summary
-}
-
-main "$@"
+You should get something like:
+
+run: dbus: (pid ...) ...
+
+NetworkManager requires D-Bus and will fail without the system D-Bus service.
+
+PipeWire also uses D-Bus for some system functionality, and Void specifically lists a missing system D-Bus service as a common PipeWire error.
+
+So this is one of the pieces I'd establish early.
+
+Phase 3 — NetworkManager decision
+
+Here's where I change my earlier recommendation slightly.
+
+You said:
+
+"I used wpa_supplicant as I found it easier."
+
+That's completely reasonable.
+
+And there's an important distinction:
+
+wpa_supplicant
+
+Handles:
+
+Wi-Fi authentication
+       ↓
+Wi-Fi association
+
+It isn't really a complete network manager.
+
+NetworkManager
+
+Handles:
+
+Wi-Fi
+Ethernet
+DHCP
+DNS
+routes
+VPN
+connection profiles
+roaming
+network state
+
+and can use wpa_supplicant underneath.
+
+So the architecture becomes:
+
+             NetworkManager
+                  │
+          ┌───────┴────────┐
+          │                │
+       Ethernet       Wi-Fi management
+                           │
+                    wpa_supplicant
+
+The key is NetworkManager owns the interface, not an independently running wpa_supplicant service.
+
+Void explicitly warns that independently running wpa_supplicant alongside NetworkManager can interfere with it.
+
+Therefore:
+
+I recommend eventually switching to:
+
+NetworkManager
+      +
+wpa_supplicant as its Wi-Fi backend
+
+rather than:
+
+wpa_supplicant service
+      +
+some separate DHCP mechanism
+
+That will also give us a much nicer foundation for your graphical desktop.
+
+Phase 4 — Switch networking carefully
+
+Do not do this until your current Internet connection is confirmed working.
+
+Install:
+
+doas xbps-install -S NetworkManager
+
+Make sure D-Bus is running:
+
+sv status dbus
+
+Add yourself to the network group:
+
+doas usermod -aG network "$USER"
+
+Now disable the standalone network services:
+
+doas rm /var/service/wpa_supplicant
+
+If dhcpcd is still running:
+
+doas rm /var/service/dhcpcd
+
+Then enable NetworkManager:
+
+doas ln -s /etc/sv/NetworkManager /var/service/
+
+Check:
+
+sv status NetworkManager
+
+Then:
+
+nmcli device
+
+and:
+
+nmcli connection show
+
+For Wi-Fi:
+
+nmcli device wifi list
+
+Then connect:
+
+nmcli device wifi connect "YOUR_SSID" password "YOUR_PASSWORD"
+BUT
+
+Given the networking problems we had during installation, I want us to do this as a controlled migration, not blindly execute it.
+
+If your current wpa_supplicant configuration is rock solid, we can even postpone this until after Mango is running.
+
+Phase 5 — Seatd
+
+We're sticking with this.
+
+Install:
+
+doas xbps-install -S seatd
+
+Enable:
+
+doas ln -s /etc/sv/seatd /var/service/
+
+Add your user to _seatd, not seat:
+
+doas usermod -aG _seatd "$USER"
+
+The current Void handbook explicitly specifies _seatd for non-root access.
+
+Check:
+
+groups
+
+after logging out and back in.
+
+Phase 6 — Turnstile
+
+This is the piece I think makes our original seatd decision considerably better.
+
+Install:
+
+doas xbps-install -S turnstile
+
+Enable:
+
+doas ln -s /etc/sv/turnstiled /var/service/
+
+Then log out and back in.
+
+Why?
+
+Because seatd does not provide XDG_RUNTIME_DIR or a user session.
+
+Turnstile can.
+
+Void explicitly recommends:
+
+turnstile + seatd + acpid
+
+when using turnstile without elogind.
+
+And turnstile can also manage per-user services, including a D-Bus session bus. That's very interesting for our eventual PipeWire/Mango setup.
+
+So our architecture becomes:
+
+                 login
+                   │
+               turnstile
+             ┌─────┴─────┐
+             │           │
+       XDG_RUNTIME_DIR  user services
+             │           │
+             │          D-Bus
+             │           │
+             └─────┬─────┘
+                   │
+                 Mango
+
+That's much cleaner than trying to make Mango itself carry all of this.
+
+Phase 7 — SSD/TRIM
+
+Yes. Absolutely.
+
+This is one of the things we should configure.
+
+First:
+
+lsblk --discard
+
+Void says non-zero DISC-GRAN and DISC-MAX indicate that the device supports discard/TRIM.
+
+Then test:
+
+doas fstrim /
+
+If successful you'll see something like:
+
+/: xxx GiB (.... bytes) trimmed
+Periodic TRIM
+
+I would not put discard into /etc/fstab by default.
+
+Void actually recommends periodic TRIM and says continuous discard can be undesirable on some SSDs.
+
+For our minimalist system, I'd use a weekly job.
+
+We have two choices.
+
+Option A — cron
+
+Install a cron implementation and put:
+
+#!/bin/sh
+
+fstrim /
+
+in:
+
+/etc/cron.weekly/fstrim
+
+Void documents exactly this approach.
+
+Option B — Void's snooze
+
+Void also provides snooze-weekly, which runs scripts in /etc/cron.weekly.
+
+I'd actually investigate using snooze + the weekly directory for our setup before installing a full cron daemon.
+
+That fits our philosophy nicely:
+
+Need scheduled tasks?
+       ↓
+snooze
+       ↓
+run weekly scripts
+
+instead of:
+
+install a permanent cron daemon
+
+We'll decide when we reach that step.
+
+Phase 8 — Check swap
+
+You told me earlier that this machine has 8 GB RAM.
+
+We need to verify what we actually created.
+
+Run:
+
+swapon --show
+
+and:
+
+free -h
+
+If you have swap already, great.
+
+If you don't, we'll decide between:
+
+swap partition
+
+or
+
+swapfile
+
+before doing anything else.
+
+Void recommends swap particularly for low-RAM machines and notes that hibernation requires swap.
+
+For your system, I'm leaning toward a swapfile if one wasn't created during installation, unless you've got a specific reason to use a partition.
+
+Phase 9 — Time and timezone
+
+Since you're dual-booting Windows, this deserves attention.
+
+Void normally uses:
+
+hardware clock = UTC
+
+but Windows normally uses local time. Void explicitly warns that this can cause conflicts in a dual-boot setup.
+
+Check:
+
+date
+
+and:
+
+date -u
+
+Check:
+
+ls -l /etc/localtime
+
+For Kenya we'd normally use:
+
+Africa/Nairobi
+
+so:
+
+doas ln -sf /usr/share/zoneinfo/Africa/Nairobi /etc/localtime
+
+Then we'll configure an NTP client.
+
+I'm leaning toward chrony:
+
+doas xbps-install -S chrony
+
+because Void describes Chrony as being designed for fast synchronization and accuracy under varying conditions.
+
+Enable:
+
+doas ln -s /etc/sv/chronyd /var/service/
+
+We'll verify the exact service name on your installed package before enabling it.
+
+Phase 10 — CPU microcode + firmware
+
+This is another yes.
+
+First determine your CPU:
+
+lscpu | grep 'Vendor ID'
+
+For Intel:
+
+doas xbps-install -S intel-ucode
+
+Void notes that Intel microcode comes from the nonfree repository and requires regenerating the initramfs after first installation.
+
+For AMD, the relevant firmware package is:
+
+linux-firmware-amd
+
+which also contains AMD CPU microcode.
+
+We'll do this based on your actual CPU rather than blindly installing both.
+
+Phase 11 — GPU
+
+Before Mango.
+
+This is important.
+
+We need:
+
+lspci | grep -E 'VGA|3D|Display'
+
+Then we'll install the appropriate graphics stack.
+
+For example, AMD generally needs:
+
+mesa-dri
+linux-firmware-amd
+
+and potentially Vulkan/VA-API packages. Void's AMD documentation specifies mesa-dri for OpenGL and mesa-vulkan-radeon for Vulkan.
+
+Intel similarly needs:
+
+mesa-dri
+linux-firmware-intel
+
+with the appropriate Vulkan/VA-API packages depending on what we want.
+
+We shouldn't install random GPU packages until we know your GPU.
+
+Phase 12 — Power management
+
+Because you're on a laptop, this is worth doing.
+
+Void's default installation may already have acpid. Its handbook says acpid handles ACPI events and can use zzz for suspend.
+
+Check:
+
+sv status acpid
+
+If it isn't installed/running:
+
+doas xbps-install -S acpid
+
+and:
+
+doas ln -s /etc/sv/acpid /var/service/
+TLP?
+
+Potentially:
+
+doas xbps-install -S tlp
+
+Void supports it for laptop power saving.
+
+But I wouldn't install TLP yet.
+
+First get Mango working.
+
+Then measure battery/power behavior.
+
+If we need TLP, add it.
+
+Phase 13 — Firewall
+
+This is another thing I'd consider, but not blindly enable yet.
+
+Void supports both iptables and nftables and documents nftables as the modern replacement for the xtables family.
+
+I'd eventually prefer:
+
+nftables
+
+over installing some giant firewall frontend.
+
+But first:
+
+ss -tulpn
+
+Let's see what is actually listening.
+
+If you're not running:
+
+SSH server
+web server
+databases
+etc.
+
+your attack surface is already quite small.
+
+Then we can make a simple nftables policy.
+
+Phase 14 — AppArmor
+
+This is optional, but interesting.
+
+Void supports AppArmor. It can constrain applications using mandatory access-control policies.
+
+I'd put it in our:
+
+Security hardening — later
+
+bucket.
+
+Not in:
+
+Essential post-install
+
+because I don't want our first Mango boot buried under security policy debugging.
+
+Phase 15 — Mango
+
+Only after the foundation is healthy.
+
+Install:
+
+doas xbps-install -S mangowc foot rofi waybar mako swaybg wl-clipboard
+
+Then:
+
+mkdir -p ~/.config/mango
+
+and we'll build the Mango configuration properly.
+
+At this point:
+
+D-Bus       ✅
+Network     ✅
+seatd       ✅
+turnstile   ✅
+GPU         ✅
+firmware    ✅
+TRIM        ✅
+time        ✅
+swap        ✅
+
+Then:
+
+                    TTY
+                     │
+                     ▼
+                   Mango
+                     │
+          ┌──────────┼──────────┐
+          ▼          ▼          ▼
+        foot        rofi      waybar
+
+No display manager yet.
+
+I still strongly prefer launching Mango manually initially.
+
+Phase 16 — PipeWire
+
+And yes — later.
+
+Once Mango itself works:
+
+doas xbps-install -S pipewire
+
+Current Void's PipeWire package brings in WirePlumber as the session manager.
+
+We'll make sure:
+
+turnstile
+    ↓
+D-Bus session
+    ↓
+PipeWire
+    ↓
+WirePlumber
+
+works properly.
+
+This is especially important because we're choosing seatd rather than elogind. Void notes that without elogind, PipeWire needs appropriate device access, and XDG_RUNTIME_DIR must be configured.
+
+So postponing PipeWire is actually a good thing.
+
+Things I'm deliberately NOT putting into the initial setup
+
+This is important.
+
+We don't need:
+
+❌ Display manager
+
+No LightDM yet.
+
+❌ Full desktop environment
+
+No GNOME/KDE/XFCE.
+
+❌ PulseAudio
+
+We're going PipeWire.
+
+❌ elogind
+
+We're committed to seatd for now.
+
+❌ TLP immediately
+
+Only if we actually need it.
+
+❌ AppArmor immediately
+
+Security hardening comes after the base system is stable.
+
+❌ Firewall immediately
+
+First inspect what's listening.
+
+❌ Flatpak
+
+Only if you actually need software from it.
+
+❌ Xorg
