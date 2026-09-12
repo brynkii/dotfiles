@@ -1,0 +1,1 @@
+1789220570997	SessionStore.LogManager	ERROR	Failed to copy log stream to file: UnknownError: Could not create directory `/home/brian/.config/mozilla/firefox/zuc7msp6.default-default/sessionstore-logs' (NS_ERROR_FAILURE) No traceback available
